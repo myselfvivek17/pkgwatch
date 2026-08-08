@@ -34,10 +34,18 @@ CREATE TABLE advisories (
   -- would mean scanning the whole ecosystem per lookup — the watcher does one
   -- lookup per installed package.
   name_normalized TEXT NOT NULL,
-  summary TEXT, severity_cvss REAL,
+  severity_cvss REAL,
   published INTEGER NOT NULL, modified INTEGER NOT NULL, withdrawn INTEGER
 );
 CREATE INDEX idx_adv_pkg ON advisories(ecosystem, name_normalized);
+
+-- Summaries live once per advisory id, not once per affected package. A single
+-- CVE lands in Debian 11, 12, 13 and 14 with the same prose, and OSV summaries
+-- average ~245 characters for distributions; storing them per row duplicated
+-- 40MB across a bundle every agent downloads.
+CREATE TABLE advisory_text (
+  id TEXT PRIMARY KEY, summary TEXT
+) WITHOUT ROWID;
 
 CREATE TABLE advisory_versions (           -- exact hits, the fast path
   advisory_id INTEGER NOT NULL, version TEXT NOT NULL,
@@ -59,7 +67,7 @@ CREATE TABLE bundle_meta (k TEXT PRIMARY KEY, v TEXT);
 // without this check a newer builder's output would simply return no rows,
 // which reads as "no advisories" rather than as an error. Bump it whenever
 // schemaSQL changes shape.
-const SchemaVersion = "3"
+const SchemaVersion = "4"
 
 // versionFormat constrains bundle versions to fixed-width, lexicographically
 // sortable strings: YYYYMMDD, optionally with an hourly delta suffix
@@ -164,12 +172,18 @@ func insertAll(db *sql.DB, advisories []match.Advisory) (int, error) {
 
 	insAdv, err := tx.Prepare(`INSERT INTO advisories
 		(id, source, kind, ecosystem, package_name, name_normalized,
-		 summary, severity_cvss, published, modified, withdrawn)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+		 severity_cvss, published, modified, withdrawn)
+		VALUES (?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return 0, err
 	}
 	defer insAdv.Close()
+
+	insText, err := tx.Prepare(`INSERT OR IGNORE INTO advisory_text (id, summary) VALUES (?,?)`)
+	if err != nil {
+		return 0, err
+	}
+	defer insText.Close()
 
 	insVer, err := tx.Prepare(`INSERT OR IGNORE INTO advisory_versions (advisory_id, version) VALUES (?,?)`)
 	if err != nil {
@@ -208,10 +222,14 @@ func insertAll(db *sql.DB, advisories []match.Advisory) (int, error) {
 
 		result, err := insAdv.Exec(adv.ID, adv.Source, adv.Kind, adv.Ecosystem,
 			adv.PackageName, match.NormalizeName(adv.Ecosystem, adv.PackageName),
-			adv.Summary, severity,
-			adv.Published.Unix(), adv.Modified.Unix(), withdrawn)
+			severity, adv.Published.Unix(), adv.Modified.Unix(), withdrawn)
 		if err != nil {
 			return 0, fmt.Errorf("bundle: insert %s: %w", key, err)
+		}
+		if adv.Summary != "" {
+			if _, err := insText.Exec(adv.ID, adv.Summary); err != nil {
+				return 0, fmt.Errorf("bundle: insert summary for %s: %w", adv.ID, err)
+			}
 		}
 		rowID, err := result.LastInsertId()
 		if err != nil {

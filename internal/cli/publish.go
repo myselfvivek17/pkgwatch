@@ -202,7 +202,25 @@ func readOSVDir(dir string) ([]match.Advisory, int, error) {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(strings.ToLower(d.Name()), ".json") {
+		if d.IsDir() {
+			return nil
+		}
+
+		// OSV publishes one all.zip per ecosystem, so a directory of archives
+		// is the shape the publisher actually works with.
+		if strings.HasSuffix(strings.ToLower(d.Name()), ".zip") {
+			fromZip, zipSkipped, zipErr := readOSVZip(path)
+			if zipErr != nil {
+				slog.Warn("skipping unreadable archive", "path", path, "error", zipErr)
+				skipped++
+				return nil
+			}
+			advisories = append(advisories, fromZip...)
+			skipped += zipSkipped
+			return nil
+		}
+
+		if !strings.HasSuffix(strings.ToLower(d.Name()), ".json") {
 			return nil
 		}
 

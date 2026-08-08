@@ -3,19 +3,7 @@
 package match
 
 import (
-	"fmt"
-	"regexp"
-	"strings"
 	"time"
-
-	"github.com/myselfvivek17/pkgwatch/internal/version/npmver"
-	"github.com/myselfvivek17/pkgwatch/internal/version/pep440"
-)
-
-// Ecosystem identifiers, spelled as OSV spells them.
-const (
-	EcosystemNPM  = "npm"
-	EcosystemPyPI = "PyPI"
 )
 
 // Advisory kinds. Malware and vulnerabilities are different products: one is
@@ -82,21 +70,6 @@ type Package struct {
 	Scope      string
 	HasScripts bool
 	LastSeen   time.Time
-}
-
-// pep503 collapses runs of the separators PEP 503 treats as equivalent.
-var pep503Separators = regexp.MustCompile(`[-_.]+`)
-
-// NormalizeName folds a package name to the form used for lookups.
-//
-// Python names are normalized per PEP 503. npm names are returned untouched:
-// they are case-sensitive, so folding them would match a different package
-// than the one installed.
-func NormalizeName(ecosystem, name string) string {
-	if ecosystem == EcosystemPyPI {
-		return pep503Separators.ReplaceAllString(strings.ToLower(name), "-")
-	}
-	return name
 }
 
 // Affects reports whether pkg falls inside adv.
@@ -175,42 +148,6 @@ func inRange(cmp comparator, version string, r Range) (bool, error) {
 	// An interval with no bounds at all still means "affected" — that is how an
 	// unfixed advisory covering every version is expressed.
 	return true, nil
-}
-
-// comparator returns -1, 0 or +1 comparing two version strings.
-type comparator func(a, b string) (int, error)
-
-func comparatorFor(ecosystem string) (comparator, error) {
-	switch ecosystem {
-	case EcosystemNPM:
-		return func(a, b string) (int, error) {
-			av, err := npmver.Parse(a)
-			if err != nil {
-				return 0, err
-			}
-			bv, err := npmver.Parse(b)
-			if err != nil {
-				return 0, err
-			}
-			return npmver.Compare(av, bv), nil
-		}, nil
-	case EcosystemPyPI:
-		return func(a, b string) (int, error) {
-			av, err := pep440.Parse(a)
-			if err != nil {
-				return 0, err
-			}
-			bv, err := pep440.Parse(b)
-			if err != nil {
-				return 0, err
-			}
-			return pep440.Compare(av, bv), nil
-		}, nil
-	default:
-		// Other ecosystems arrive in M1b. Refusing loudly beats guessing at an
-		// ordering and reporting a confident wrong answer.
-		return nil, fmt.Errorf("match: no version comparator for ecosystem %q", ecosystem)
-	}
 }
 
 // Score rates a finding, and returns the tier it lands in.

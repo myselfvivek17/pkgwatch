@@ -23,7 +23,8 @@ One machine can run both.
 | M0 — skeleton, config, DB, CLI, `/health`, CI | done |
 | M0.5 — design system, dashboard shell | done |
 | M1 — advisory bundle pipeline, PEP 440 + semver matching, `check` | done |
-| M1b — Go, Rust, Java, Ruby, PHP, .NET, Debian/Alpine/Ubuntu matching | next |
+| M1b — Debian, Ubuntu, Alpine, Go, Rust matching | done |
+| M1b — Java, Ruby, PHP, .NET matching | remaining |
 | M2 — npm and PyPI gates | |
 | M3 — inventory, Docker collector, retroactive watcher | |
 | M4 — agent dashboard pages | |
@@ -67,6 +68,13 @@ pkgwatch sync --file advisories.db
 
 The whole npm ecosystem — 228,957 advisories from a 208 MB OSV archive — compiles in about 13 seconds into a **49 MB** bundle. That is well above the 15–25 MB the design anticipated, and the reason is worth stating: **219,308 of the 227,080 rows are malware records**, not vulnerabilities. The `ossf/malicious-packages` feed has grown by more than an order of magnitude, which is itself the argument for this tool existing.
 
+Adding Debian, Alpine, Go and crates.io brings it to 496,740 records and **110 MB**, down from 313 MB by two changes that lose nothing:
+
+- **Enumerated versions are dropped when the advisory also gives ranges.** Debian enumerates every affected version across four releases; the range already says the same thing. That alone was 7 million rows and 160 MB. Malware records keep their enumeration even when a range exists — a range spanning a non-contiguous set would mark clean versions in the gap as malicious, and "this package is malware" must never be reached by inference.
+- **Summaries are stored once per advisory id**, not once per affected package. One CVE lands in four Debian releases with identical prose averaging ~245 characters.
+
+110 MB is still more than a fleet-wide bundle should be, and per-ecosystem bundles are the obvious next step — an agent with no Debian packages has no use for 200,000 Debian rows.
+
 A bundle is trusted because of who signed it, never because of where it came from. Verification is identical and mandatory whether the bytes came from the publisher or from your own hub, and `sync` refuses:
 
 - bytes that do not match the manifest digest
@@ -84,6 +92,18 @@ Version comparison is where correctness actually lives — both false positives 
 The **PEP 440** parser is hand-written, because no Go library handles epochs (`1!2.0`), post-releases, dev releases and local versions correctly together. It is checked two ways: a hand-written table encoding what the specification says, and a differential test against CPython's own `packaging` library covering **9,634 versions** for normalization and **6,511** for total ordering. The golden file is committed, so CI needs no Python.
 
 **npm** versions go through `Masterminds/semver` in strict mode, pinned to the behaviour advisory matching depends on: a prerelease sorts below its own release, so `1.0.0-beta.1` never falls inside a range introduced at `1.0.0`.
+
+**Debian and Ubuntu** use a hand-written `deb-version(7)` comparator, checked against Debian's own `apt_pkg.version_compare` across 852 versions and 402 equality pairs. Two of its rules are unlike anything else: `~` sorts *before* the end of a string (which is how Debian spells a pre-release, so `1.0~rc1` precedes `1.0`), and letters sort before all non-letters rather than in ASCII order.
+
+**Alpine** uses a hand-written apk comparator, checked against `apk version -t` across all 1,600 pairwise comparisons of its corpus. Its quirks were read off apk itself rather than from documentation: trailing components are significant (`1.0 < 1.0.0`, the opposite of PEP 440), a component with a leading zero compares as a fraction (`1.01 < 1.1`), and an absent suffix number sorts below zero (`1.0_p < 1.0_p0`).
+
+**Distribution advisories keep their release qualifier.** A CVE lands in `Debian:11`, `Debian:12`, `Debian:13` and `Debian:14` with a *different fixed version in each*, so collapsing them would match against the wrong distribution's bounds. `check` requires the release:
+
+```sh
+pkgwatch check "pkg:deb/debian/openssl@3.0.11-1~deb12u2?distro=debian-12"
+```
+
+Verified against a live `debian:12-slim` container: all 88 of its real installed packages parsed without error, 8 flagged with findings consistent with Debian's tracker, and the fix boundary holds — `3.0.11-1~deb12u2` is flagged for a CVE that `3.0.19-1~deb12u2` is clean for.
 
 CVSS base scores are computed from the vector strings OSV publishes, falling back to the qualitative rating when no vector is present.
 

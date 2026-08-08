@@ -58,13 +58,9 @@ type Record struct {
 	} `json:"database_specific"`
 }
 
-// supportedEcosystems are the ones with a version comparator today. Other
-// ecosystems arrive in M1b; importing them now would store rows nothing can
-// compare, which reads as "no advisories" rather than "cannot evaluate".
-var supportedEcosystems = map[string]string{
-	"npm":  match.EcosystemNPM,
-	"PyPI": match.EcosystemPyPI,
-}
+// Whether an ecosystem can be imported is decided by match's comparator
+// registry: storing rows nothing can compare reads as "no advisories" rather
+// than "cannot evaluate", which is the wrong way to be wrong.
 
 // ParseRecord reads one OSV JSON document and returns one advisory per affected
 // package — lookups are per (ecosystem, name), so splitting here keeps them a
@@ -100,8 +96,11 @@ func (rec Record) Advisories() []match.Advisory {
 
 	var out []match.Advisory
 	for _, affected := range rec.Affected {
-		ecosystem, ok := supportedEcosystems[normalizeEcosystem(affected.Package.Ecosystem)]
-		if !ok {
+		// Keep the release qualifier ("Debian:12", "Alpine:v3.19"): the same
+		// package has different fixed versions per release, so collapsing them
+		// would match against the wrong distribution's bounds.
+		ecosystem := affected.Package.Ecosystem
+		if !match.Supported(ecosystem) {
 			continue
 		}
 
@@ -130,6 +129,20 @@ func (rec Record) Advisories() []match.Advisory {
 				continue
 			}
 			adv.Ranges = append(adv.Ranges, eventsToIntervals(r.Events)...)
+		}
+
+		// For a vulnerability, the enumerated version list is the expanded form
+		// of the ranges, so storing both duplicates what the range already
+		// says. Debian enumerates exhaustively across four releases: dropping
+		// the redundant copies takes ~7M rows and 160MB out of a bundle every
+		// agent downloads.
+		//
+		// Malware keeps its enumeration even when a range is present. A range
+		// spanning a non-contiguous set would mark clean versions in the gap as
+		// malicious, and "this package is malware" is the one verdict that must
+		// never be reached by inference. Malware enumerations are small anyway.
+		if len(adv.Ranges) > 0 && kind != match.KindMalware {
+			adv.Versions = nil
 		}
 
 		out = append(out, adv)
@@ -199,13 +212,6 @@ func (rec Record) severityScore() *float64 {
 		return &score
 	}
 	return nil
-}
-
-// normalizeEcosystem strips the ":suffix" some ecosystems carry, e.g.
-// "Alpine:v3.19" or "Debian:12".
-func normalizeEcosystem(e string) string {
-	name, _, _ := strings.Cut(e, ":")
-	return name
 }
 
 func firstLine(s string) string {

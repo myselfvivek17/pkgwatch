@@ -19,10 +19,11 @@ func LookupAdvisories(handle *sql.DB, ecosystem, name string) ([]match.Advisory,
 	normalized := match.NormalizeName(ecosystem, name)
 
 	rows, err := handle.Query(`
-		SELECT rowid, id, source, kind, ecosystem, package_name, summary,
-		       severity_cvss, published, modified, withdrawn
-		FROM adv.advisories
-		WHERE ecosystem = ? AND name_normalized = ?`, ecosystem, normalized)
+		SELECT a.rowid, a.id, a.source, a.kind, a.ecosystem, a.package_name, t.summary,
+		       a.severity_cvss, a.published, a.modified, a.withdrawn
+		FROM adv.advisories a
+		LEFT JOIN adv.advisory_text t ON t.id = a.id
+		WHERE a.ecosystem = ? AND a.name_normalized = ?`, ecosystem, normalized)
 	if err != nil {
 		return nil, fmt.Errorf("repo: query advisories: %w", err)
 	}

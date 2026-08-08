@@ -212,20 +212,60 @@ func TestOneRecordPerAffectedPackage(t *testing.T) {
 	}
 }
 
+// An ecosystem with no comparator is dropped at import rather than stored:
+// rows nothing can evaluate read as "no advisories" instead of "cannot
+// evaluate", which is the wrong way to be wrong.
 func TestUnsupportedEcosystemsAreDropped(t *testing.T) {
-	// M1 gates and matches npm and PyPI. Other ecosystems arrive in M1b;
-	// importing them now would store rows nothing can compare.
 	record := `{"id":"T-eco","affected":[
-		{"package":{"ecosystem":"Go","name":"golang.org/x/net"},"versions":["1.0.0"]},
+		{"package":{"ecosystem":"Maven","name":"org.apache:log4j"},"versions":["1.0.0"]},
 		{"package":{"ecosystem":"npm","name":"a"},"versions":["1.0.0"]},
+		{"package":{"ecosystem":"Go","name":"golang.org/x/net"},"versions":["v1.0.0"]},
 		{"package":{"ecosystem":"PyPI","name":"Django"},"versions":["1.0"]}]}`
 
 	got, err := ParseRecord([]byte(record))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(got) != 3 {
+		names := make([]string, 0, len(got))
+		for _, a := range got {
+			names = append(names, a.Ecosystem)
+		}
+		t.Fatalf("got %v, want npm, Go and PyPI — Maven has no comparator yet", names)
+	}
+}
+
+// Distribution advisories are release-specific: the same package has different
+// fixed versions in Debian 11 and Debian 12. The release qualifier must survive
+// import, or bounds get matched against the wrong distribution.
+func TestDistroReleaseQualifierIsPreserved(t *testing.T) {
+	record := `{"id":"DSA-1","affected":[
+		{"package":{"ecosystem":"Debian:11","name":"openssl"},
+		 "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1.1.1n-0+deb11u1"}]}]},
+		{"package":{"ecosystem":"Debian:12","name":"openssl"},
+		 "ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"3.0.11-1~deb12u1"}]}]}]}`
+
+	got, err := ParseRecord([]byte(record))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 {
-		t.Fatalf("got %d advisories, want npm and PyPI only", len(got))
+		t.Fatalf("got %d advisories, want one per Debian release", len(got))
+	}
+	if got[0].Ecosystem != "Debian:11" || got[1].Ecosystem != "Debian:12" {
+		t.Errorf("ecosystems = %q, %q — the release qualifier was stripped",
+			got[0].Ecosystem, got[1].Ecosystem)
+	}
+
+	// Each still resolves to the dpkg comparator despite the qualifier.
+	affected, err := match.Affects(got[1], match.Package{
+		Ecosystem: "Debian:12", Name: "openssl", Version: "3.0.9-1",
+	})
+	if err != nil {
+		t.Fatalf("Debian:12 advisory could not be evaluated: %v", err)
+	}
+	if !affected {
+		t.Error("openssl 3.0.9-1 should be affected by the Debian 12 advisory")
 	}
 }
 
