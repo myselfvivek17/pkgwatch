@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -114,5 +115,69 @@ func TestAttachAdvisoriesReadsBundle(t *testing.T) {
 	// Detach must free the file so a bundle update can swap it (§3.2).
 	if err := DetachAdvisories(handle); err != nil {
 		t.Errorf("detach: %v", err)
+	}
+}
+
+// A bundle arrives as a whole-file swap, so a layout change has nothing else to
+// catch it: the failure mode without this gate is a raw "no such column" from
+// inside the matcher, or zero rows, which reads as "no advisories" rather than
+// "cannot evaluate".
+func TestCheckAdvisorySchema(t *testing.T) {
+	tests := []struct {
+		name      string
+		declared  string // "" means the bundle records no schema at all
+		want      string
+		wantError bool
+	}{
+		{"matching", "3", "3", false},
+		{"older bundle, newer binary", "2", "3", true},
+		{"newer bundle, older binary", "4", "3", true},
+		{"bundle predates schema versioning", "", "3", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			bundlePath := filepath.Join(dir, "advisories.db")
+
+			bundleDB, err := Open(bundlePath, SchemaAgent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := bundleDB.Exec(`CREATE TABLE bundle_meta (k TEXT PRIMARY KEY, v TEXT)`); err != nil {
+				t.Fatal(err)
+			}
+			if tt.declared != "" {
+				if _, err := bundleDB.Exec("INSERT INTO bundle_meta VALUES ('schema', ?)", tt.declared); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bundleDB.Close()
+
+			handle, err := Open(filepath.Join(dir, "agent.db"), SchemaAgent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer handle.Close()
+
+			if _, err := AttachAdvisories(handle, bundlePath); err != nil {
+				t.Fatal(err)
+			}
+
+			err = CheckAdvisorySchema(handle, tt.want)
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("schema %q should not be accepted by a build reading %q", tt.declared, tt.want)
+				}
+				var mismatch ErrSchemaMismatch
+				if !errors.As(err, &mismatch) {
+					t.Errorf("error should be an ErrSchemaMismatch, got %T: %v", err, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("schema %q should be accepted: %v", tt.declared, err)
+			}
+		})
 	}
 }

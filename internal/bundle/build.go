@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -60,6 +61,28 @@ CREATE TABLE bundle_meta (k TEXT PRIMARY KEY, v TEXT);
 // schemaSQL changes shape.
 const SchemaVersion = "3"
 
+// versionFormat constrains bundle versions to fixed-width, lexicographically
+// sortable strings: YYYYMMDD, optionally with an hourly delta suffix
+// (20260809T1400).
+//
+// The agent's rollback guard compares versions as strings, because that is the
+// only ordering available without a version grammar of its own. Free-text
+// versions like "2026-08-09" or "v20260809" would sort wrong against "20260808"
+// and the guard would fail silently — in whichever direction. Enforcing the
+// format at signing time is what keeps that comparison honest.
+var versionFormat = regexp.MustCompile(`^[0-9]{8}(T[0-9]{4})?$`)
+
+// ValidateVersion reports whether a bundle version is safely comparable.
+func ValidateVersion(version string) error {
+	if !versionFormat.MatchString(version) {
+		return fmt.Errorf(
+			"bundle version %q must be YYYYMMDD or YYYYMMDDThhmm — the agent's "+
+				"rollback check compares versions as strings, and anything else sorts wrong",
+			version)
+	}
+	return nil
+}
+
 // advisoryKey identifies an advisory row for build-time deduplication. It is
 // not stored: keeping it out of the file is worth more than the index it would
 // otherwise provide, and nothing queries by it at runtime.
@@ -70,6 +93,9 @@ func advisoryKey(adv match.Advisory) string {
 // Build writes a complete advisory database at path and returns its manifest,
 // unsigned. The caller signs the file's bytes.
 func Build(path, version string, advisories []match.Advisory, builtAt time.Time) (Manifest, error) {
+	if err := ValidateVersion(version); err != nil {
+		return Manifest{}, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return Manifest{}, fmt.Errorf("bundle: create output dir: %w", err)
 	}

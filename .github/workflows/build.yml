@@ -18,11 +18,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          # Read the version from go.mod rather than pinning one here. A
-          # hardcoded number drifts the moment a dependency raises its
-          # requirement, and the first thing to break is govulncheck, which
-          # cannot load packages built for a newer toolchain than its own.
-          go-version-file: go.mod
+          # "stable", not a pinned number and not go.mod's version. The go
+          # directive is a *floor* — building with exactly that release means
+          # building with an unpatched toolchain, and govulncheck rightly fails
+          # it: go1.25.0 ships crypto/tls and net/textproto vulnerabilities that
+          # are reachable from this binary's own HTTP server. A pinned number
+          # also breaks the moment a dependency raises its requirement.
+          go-version: stable
+          check-latest: true
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
@@ -41,11 +44,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          # Read the version from go.mod rather than pinning one here. A
-          # hardcoded number drifts the moment a dependency raises its
-          # requirement, and the first thing to break is govulncheck, which
-          # cannot load packages built for a newer toolchain than its own.
-          go-version-file: go.mod
+          # "stable", not a pinned number and not go.mod's version. The go
+          # directive is a *floor* — building with exactly that release means
+          # building with an unpatched toolchain, and govulncheck rightly fails
+          # it: go1.25.0 ships crypto/tls and net/textproto vulnerabilities that
+          # are reachable from this binary's own HTTP server. A pinned number
+          # also breaks the moment a dependency raises its requirement.
+          go-version: stable
+          check-latest: true
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - run: govulncheck ./...
 
@@ -66,11 +72,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          # Read the version from go.mod rather than pinning one here. A
-          # hardcoded number drifts the moment a dependency raises its
-          # requirement, and the first thing to break is govulncheck, which
-          # cannot load packages built for a newer toolchain than its own.
-          go-version-file: go.mod
+          # "stable", not a pinned number and not go.mod's version. The go
+          # directive is a *floor* — building with exactly that release means
+          # building with an unpatched toolchain, and govulncheck rightly fails
+          # it: go1.25.0 ships crypto/tls and net/textproto vulnerabilities that
+          # are reachable from this binary's own HTTP server. A pinned number
+          # also breaks the moment a dependency raises its requirement.
+          go-version: stable
+          check-latest: true
 
       - name: build
         env:

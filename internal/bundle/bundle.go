@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -116,11 +117,19 @@ func Install(path string, data []byte) error {
 		return fmt.Errorf("bundle: chmod: %w", err)
 	}
 
-	// Windows will not rename onto an existing file that is open elsewhere.
-	// Callers must DETACH the advisory schema first; removing the old name here
-	// keeps the rename portable.
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("bundle: remove previous bundle: %w", err)
+	// On POSIX, rename over an existing path is atomic and the old file stays
+	// readable until the instant it is replaced. Removing first would open a
+	// window where advisories.db does not exist — and a crash in that window
+	// leaves the agent with no bundle at all, which means the gate fails open.
+	// A machine updating its advisories must never be able to disarm itself.
+	//
+	// Windows is the exception: it will not rename onto an existing file, so
+	// there the unlink is unavoidable. Callers DETACH the advisory schema first
+	// so no handle is held open across it.
+	if runtime.GOOS == "windows" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("bundle: remove previous bundle: %w", err)
+		}
 	}
 	if err := os.Rename(tmpName, path); err != nil {
 		return fmt.Errorf("bundle: install: %w", err)

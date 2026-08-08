@@ -11,6 +11,7 @@ import (
 	"github.com/package-url/packageurl-go"
 	"github.com/spf13/cobra"
 
+	"github.com/myselfvivek17/pkgwatch/internal/bundle"
 	"github.com/myselfvivek17/pkgwatch/internal/config"
 	"github.com/myselfvivek17/pkgwatch/internal/db"
 	"github.com/myselfvivek17/pkgwatch/internal/match"
@@ -100,6 +101,9 @@ func runCheck(out io.Writer, cfg config.Config, pkg match.Package) error {
 		// most dangerous thing this command could say.
 		return fmt.Errorf("no advisory bundle installed — run `pkgwatch sync` first; " +
 			"without one nothing can be matched and this command cannot tell you anything")
+	}
+	if err := db.CheckAdvisorySchema(handle, bundle.SchemaVersion); err != nil {
+		return err
 	}
 
 	info, err := repo.Bundle(handle, true)

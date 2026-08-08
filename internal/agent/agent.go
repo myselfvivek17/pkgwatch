@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/myselfvivek17/pkgwatch/internal/buildinfo"
+	"github.com/myselfvivek17/pkgwatch/internal/bundle"
 	"github.com/myselfvivek17/pkgwatch/internal/config"
 	"github.com/myselfvivek17/pkgwatch/internal/daemon"
 	"github.com/myselfvivek17/pkgwatch/internal/db"
@@ -58,6 +59,16 @@ func Open(cfg config.Config) (*State, error) {
 		// agent still gates and still records — degraded, not dead.
 		st.warnBundleError = err
 		slog.Warn("advisory bundle present but unusable", "error", err)
+	}
+	// An attached bundle in a layout this build cannot read is worse than none:
+	// queries would fail deep inside the matcher, or return nothing at all.
+	// Treat it as unusable and keep running — the agent is degraded, not dead.
+	if attached {
+		if err := db.CheckAdvisorySchema(handle, bundle.SchemaVersion); err != nil {
+			st.warnBundleError = err
+			attached = false
+			slog.Warn("advisory bundle ignored", "error", err)
+		}
 	}
 	st.BundleAttached = attached
 

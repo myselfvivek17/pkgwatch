@@ -119,7 +119,7 @@ func installBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPa
 
 	// Only now that the bytes are trusted, read what they say about themselves
 	// and check it agrees with the manifest we verified.
-	installed, err := readBundleMeta(cfg.AdvisoryDBPath())
+	installed, err := readBundleMeta(cfg.AdvisoryDBPath(), true)
 	if err != nil {
 		return fmt.Errorf("installed bundle is unreadable: %w", err)
 	}
@@ -173,21 +173,27 @@ func readSignature(manifest bundle.Manifest, sigPath string) ([]byte, error) {
 }
 
 // currentBundleVersion reports the version already installed, or "" if none.
+//
+// Deliberately does not validate the schema. bundle_meta exists in every
+// layout, so an older-format bundle still yields a usable version — and folding
+// a schema mismatch into "unreadable" would silently switch the rollback guard
+// off exactly when a bundle is being replaced.
 func currentBundleVersion(cfg config.Config) (string, error) {
 	if _, err := os.Stat(cfg.AdvisoryDBPath()); err != nil {
 		return "", nil // nothing installed yet
 	}
-	info, err := readBundleMeta(cfg.AdvisoryDBPath())
+	info, err := readBundleMeta(cfg.AdvisoryDBPath(), false)
 	if err != nil {
-		// An unreadable current bundle should not block replacing it — that is
-		// exactly the situation a sync is meant to repair.
+		// A genuinely unreadable bundle should not block replacing it — that is
+		// exactly the situation a sync exists to repair.
 		return "", nil
 	}
 	return info.Version, nil
 }
 
 // readBundleMeta opens an already-trusted bundle to read what it declares.
-func readBundleMeta(path string) (repo.BundleInfo, error) {
+// checkSchema is false when only the version matters.
+func readBundleMeta(path string, checkSchema bool) (repo.BundleInfo, error) {
 	handle, err := db.Open(":memory:", db.SchemaAgent)
 	if err != nil {
 		return repo.BundleInfo{}, err
@@ -209,10 +215,10 @@ func readBundleMeta(path string) (repo.BundleInfo, error) {
 	if info.Version == "" {
 		return repo.BundleInfo{}, fmt.Errorf("bundle declares no version")
 	}
-	if info.Schema != bundle.SchemaVersion {
-		return repo.BundleInfo{}, fmt.Errorf(
-			"bundle uses schema %q but this build understands %q — upgrade pkgwatch",
-			info.Schema, bundle.SchemaVersion)
+	if checkSchema {
+		if err := db.CheckAdvisorySchema(handle, bundle.SchemaVersion); err != nil {
+			return repo.BundleInfo{}, err
+		}
 	}
 	return info, nil
 }

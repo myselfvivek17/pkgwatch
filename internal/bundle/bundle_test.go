@@ -164,6 +164,32 @@ func TestInstallCreatesWhenAbsent(t *testing.T) {
 	}
 }
 
+// The rollback guard compares versions as strings, so only fixed-width
+// lexicographically sortable versions may be signed.
+func TestValidateVersion(t *testing.T) {
+	valid := []string{"20260808", "20260809T1400", "19700101", "20991231T0000"}
+	for _, v := range valid {
+		if err := ValidateVersion(v); err != nil {
+			t.Errorf("ValidateVersion(%q) = %v, want nil", v, err)
+		}
+	}
+
+	invalid := []string{
+		"",
+		"2026-08-09",  // sorts below "20260808"
+		"v20260809",   // sorts below every bare digit string
+		"20260809.1",  // .10 would sort below .9
+		"1",           // not fixed width
+		"latest",      //
+		"20260809T14", // truncated time
+	}
+	for _, v := range invalid {
+		if err := ValidateVersion(v); err == nil {
+			t.Errorf("ValidateVersion(%q) = nil, want an error", v)
+		}
+	}
+}
+
 // The embedded key list is what makes rule 2 real: bundles are trusted because
 // of who signed them, never because of who served them.
 func TestBuiltInVerifierIsWiredUp(t *testing.T) {

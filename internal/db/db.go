@@ -5,6 +5,7 @@ package db
 import (
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -67,6 +68,41 @@ func Open(path string, schema Schema) (*sql.DB, error) {
 		return nil, err
 	}
 	return handle, nil
+}
+
+// ErrSchemaMismatch means the bundle on disk uses a layout this binary does not
+// read. It is deliberately distinguishable: an incompatible bundle is a
+// different situation from a missing one, and callers treat them differently.
+type ErrSchemaMismatch struct{ Found, Want string }
+
+func (e ErrSchemaMismatch) Error() string {
+	return fmt.Sprintf("advisory bundle uses schema %q but this build reads %q — upgrade pkgwatch",
+		orUnknown(e.Found), e.Want)
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "(none)"
+	}
+	return s
+}
+
+// CheckAdvisorySchema verifies an attached bundle's layout.
+//
+// A bundle arrives as a whole-file swap, so nothing else catches a layout
+// change: a mismatch would otherwise surface as a raw "no such column" from
+// deep inside a query, or worse, as zero rows — which reads as "no advisories"
+// rather than "cannot evaluate".
+func CheckAdvisorySchema(handle *sql.DB, want string) error {
+	var found string
+	err := handle.QueryRow("SELECT v FROM " + AdvisorySchema + ".bundle_meta WHERE k = 'schema'").Scan(&found)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return ErrSchemaMismatch{Want: want}
+	}
+	if found != want {
+		return ErrSchemaMismatch{Found: found, Want: want}
+	}
+	return nil
 }
 
 // AttachAdvisories attaches the advisory bundle read-only. A missing bundle is
