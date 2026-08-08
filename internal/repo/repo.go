@@ -66,6 +66,7 @@ func (a Agent) HubState(key string) (string, error) {
 type BundleInfo struct {
 	Attached    bool
 	Version     string
+	Schema      string
 	BuiltAt     time.Time
 	RecordCount int
 }
@@ -94,6 +95,8 @@ func Bundle(handle *sql.DB, attached bool) (BundleInfo, error) {
 		switch k {
 		case "version":
 			info.Version = v
+		case "schema":
+			info.Schema = v
 		case "built_at":
 			if ts, err := time.Parse(time.RFC3339, v); err == nil {
 				info.BuiltAt = ts

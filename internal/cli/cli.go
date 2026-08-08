@@ -63,8 +63,9 @@ func Root() *cobra.Command {
 		stub("shell-init [bash|zsh|fish|powershell]", "Print shell integration", "M2", cobra.ExactArgs(1)),
 
 		stub("scan", "Scan installed packages into the inventory", "M3", cobra.NoArgs),
-		stub("sync", "Fetch the advisory bundle now", "M1", cobra.NoArgs),
-		stub("check <purl>", "Check one package against the advisory bundle", "M1", cobra.ExactArgs(1)),
+		syncCmd(),
+		checkCmd(),
+		publishCmd(),
 
 		stub("findings", "List findings", "M3", cobra.NoArgs),
 		stub("ack <purl> <advisory-id>", "Acknowledge a finding", "M3", cobra.ExactArgs(2)),
