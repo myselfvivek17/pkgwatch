@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Install to ~/Library/LaunchAgents/com.pkgwatch.agent.plist then:
+    launchctl load -w ~/Library/LaunchAgents/com.pkgwatch.agent.plist
+
+  Unsigned binaries are quarantined by Gatekeeper on first run:
+    xattr -d com.apple.quarantine /usr/local/bin/pkgwatch
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pkgwatch.agent</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/pkgwatch</string>
+    <string>agent</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/pkgwatch-agent.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/pkgwatch-agent.log</string>
+</dict>
+</plist>

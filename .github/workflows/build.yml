@@ -1,0 +1,84 @@
+name: build
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Everything must build without cgo. If a dependency needs it, it is the
+  # wrong dependency — cgo is what would break the single-machine cross-compile.
+  CGO_ENABLED: "0"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          check-latest: true
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "these files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+
+  vuln:
+    # This tool exists because dependency trees get compromised. Not scanning
+    # its own would be the joke telling itself.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          check-latest: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
+
+  cross-compile:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          check-latest: true
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          out="pkgwatch-${GOOS}-${GOARCH}"
+          [ "$GOOS" = "windows" ] && out="${out}.exe"
+          go build \
+            -trimpath \
+            -ldflags="-s -w \
+              -X github.com/myselfvivek17/pkgwatch/internal/buildinfo.Version=${GITHUB_REF_NAME} \
+              -X github.com/myselfvivek17/pkgwatch/internal/buildinfo.Commit=${GITHUB_SHA::8}" \
+            -o "dist/${out}" ./cmd/pkgwatch
+          ls -lh "dist/${out}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkgwatch-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/

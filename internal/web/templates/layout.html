@@ -1,0 +1,77 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · pkgwatch</title>
+<link rel="stylesheet" href="/static/theme.css">
+<link rel="stylesheet" href="/static/app.css">
+<script>
+  // Applied before first paint so the page never flashes the wrong theme.
+  try {
+    if (localStorage.getItem("pkgwatch-theme") === "light") {
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+  } catch (e) {}
+</script>
+</head>
+<body>
+<div class="pw-root">
+
+  <aside class="pw-sidebar">
+    <div class="pw-brand">
+      <span class="pw-brand-mark">
+        <svg width="13" height="13" viewBox="0 0 12 12" aria-hidden="true">
+          <rect x="0.5" y="6" width="2.4" height="5.5" fill="currentColor"></rect>
+          <rect x="4.8" y="2.5" width="2.4" height="9" fill="currentColor"></rect>
+          <rect x="9.1" y="4.5" width="2.4" height="7" fill="currentColor"></rect>
+        </svg>
+      </span>
+      <div>
+        <div class="pw-brand-name">pkgwatch</div>
+        <div class="pw-brand-sub">{{.Identity}}</div>
+      </div>
+    </div>
+
+    <nav class="pw-nav">
+      {{range .Nav}}
+        {{if .Enabled}}
+          <a class="pw-nav-item{{if .Active}} is-active{{end}}" href="{{.Href}}">
+            <span class="pw-nav-dot"></span>{{.Label}}
+          </a>
+        {{else}}
+          <span class="pw-nav-item is-disabled" title="Not built yet" aria-disabled="true">
+            <span class="pw-nav-dot"></span>{{.Label}}
+          </span>
+        {{end}}
+      {{end}}
+    </nav>
+
+    <div class="pw-sidebar-footer">
+      <div class="pw-status-line">
+        <span class="pw-status-dot{{if not .Connected}} is-off{{end}}"></span>
+        {{.ConnectionLabel}}
+      </div>
+      <button class="pw-theme-toggle" data-theme-toggle type="button">
+        <svg width="12" height="12" viewBox="0 0 12 12" style="flex:none" aria-hidden="true">
+          <g class="pw-theme-icon-dark">
+            <circle cx="6" cy="6" r="5" fill="none" stroke="currentColor" stroke-width="1"></circle>
+            <path d="M6 1 A5 5 0 0 0 6 11 Z" fill="currentColor"></path>
+          </g>
+          <g class="pw-theme-icon-light">
+            <circle cx="6" cy="6" r="3" fill="currentColor"></circle>
+          </g>
+        </svg>
+        <span class="pw-theme-label-dark">dark</span><span class="pw-theme-label-light">light</span>
+      </button>
+    </div>
+  </aside>
+
+  <main class="pw-main">
+    {{template "content" .}}
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
+{{end}}

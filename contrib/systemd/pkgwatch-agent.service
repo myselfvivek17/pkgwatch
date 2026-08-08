@@ -1,0 +1,22 @@
+# User unit, not system: the agent inventories this user's packages and reads
+# this user's credentials paths. Install to ~/.config/systemd/user/ then:
+#   systemctl --user enable --now pkgwatch-agent
+#   loginctl enable-linger $USER     # so it survives logout
+
+[Unit]
+Description=pkgwatch agent
+Documentation=https://github.com/myselfvivek17/pkgwatch
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/pkgwatch agent
+Restart=on-failure
+RestartSec=5
+
+# The agent gates installs. If it cannot start, that must be loud, not a
+# silent open door — so failures restart rather than disabling the unit.
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=default.target

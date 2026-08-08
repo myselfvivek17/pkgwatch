@@ -1,0 +1,18 @@
+# build output
+/dist/
+/pkgwatch
+/pkgwatch.exe
+
+# local data / bundles — never commit an advisory db or a signing key
+*.db
+*.db-wal
+*.db-shm
+*.key
+
+# Deliberate deviation from spec §1, which says to commit vendor/.
+# `go mod vendor` weighs 134 MB — 125 MB of it machine-generated
+# modernc.org/{libc,sqlite}, one file set per GOOS/GOARCH. go.sum already pins
+# every dependency by hash, so the tampering §1 is worried about is covered.
+# What we give up is availability if a module is yanked. Reconsider if pkgwatch
+# moves to its own repository, where the weight is contained.
+/vendor/

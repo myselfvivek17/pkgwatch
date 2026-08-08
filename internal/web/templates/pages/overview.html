@@ -1,0 +1,46 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">{{if eq .Mode "hub"}}Fleet overview{{else}}Overview{{end}}</h1>
+
+  {{with .Data}}
+  <div class="pw-card">
+    <div class="pw-section-title">This build</div>
+    <p class="pw-muted">
+      Skeleton and design system only. The gate, inventory, matching and sync are not built yet —
+      nothing here is watching anything. Nav items for unbuilt pages are shown disabled rather
+      than hidden, so the shape of the finished tool stays visible.
+    </p>
+  </div>
+
+  <div class="pw-card">
+    <div class="pw-section-title">Status</div>
+    <dl class="pw-kv">
+      <dt>mode</dt><dd>{{.Mode}}</dd>
+      <dt>version</dt><dd>{{.Version}} ({{.Commit}})</dd>
+      <dt>data dir</dt><dd>{{.DataDir}}</dd>
+      <dt>advisory bundle</dt>
+      <dd>{{if .Bundle.Attached}}{{.Bundle.Version}} · {{.Bundle.RecordCount}} records{{else}}none — never synced{{end}}</dd>
+      {{if .IsHub}}
+        <dt>devices approved</dt><dd>{{.Devices}}</dd>
+      {{else}}
+        <dt>packages known</dt><dd>{{.Packages}}</dd>
+      {{end}}
+      <dt>listening</dt><dd>{{.Listen}}</dd>
+    </dl>
+  </div>
+
+  <div class="pw-card">
+    <div class="pw-section-title">Findings</div>
+    {{if .HasFindings}}
+      <div class="pw-badge-row">
+        {{range .FindingTiers}}
+          {{if .Count}}{{template "severity-badge" .}} <span class="pw-mono" style="color:var(--text-faint);font-size:10.5px">×{{.Count}}</span>{{end}}
+        {{end}}
+      </div>
+    {{else}}
+      <p class="pw-muted">No findings recorded. On a fresh install this means nothing has been scanned yet — not that the machine is clean.</p>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}

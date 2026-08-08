@@ -1,0 +1,43 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">Design system</h1>
+  <p class="pw-muted" style="margin-bottom:22px">
+    Every token and component the dashboards are built from. Toggle the theme in the sidebar —
+    both themes must read correctly here before any page is ported.
+  </p>
+
+  <div class="pw-card">
+    <div class="pw-section-title">Severity badge</div>
+    <p class="pw-muted" style="margin-bottom:14px">
+      Each tier carries its own glyph as well as its own colour, so the badge stays legible
+      in greyscale and to colour-blind readers.
+    </p>
+    {{range .Data.Sizes}}
+      <div class="pw-badge-row">
+        <span class="pw-badge-row-label">{{.Label}}</span>
+        {{range .Badges}}{{template "severity-badge" .}}{{end}}
+      </div>
+    {{end}}
+  </div>
+
+  <div class="pw-card">
+    <div class="pw-section-title">Tokens</div>
+    <div class="pw-swatch-grid">
+      {{range .Data.Tokens}}
+        <div class="pw-swatch">
+          <div class="pw-swatch-chip" style="{{.Style}}"></div>
+          <div class="pw-swatch-name">{{.Name}}</div>
+        </div>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="pw-card">
+    <div class="pw-section-title">Type</div>
+    <div style="font-size:19px;font-weight:650;letter-spacing:-0.01em;margin-bottom:6px">Page title · 19/650</div>
+    <div class="pw-section-title">Section title · 13/650 uppercase</div>
+    <p class="pw-muted">Body copy · 12.5px, <code class="pw-mono">--text-dim</code>, 1.55 line height.</p>
+    <div class="pw-mono" style="font-size:12.5px">Monospace · pkg:npm/@ctrl/tinycolor@3.4.1</div>
+  </div>
+</div>
+{{end}}

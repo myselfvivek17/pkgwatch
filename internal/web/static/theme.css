@@ -1,0 +1,72 @@
+/* Design tokens, ported verbatim from the Claude Design project's themeVars().
+   Names are unchanged on purpose: the design is the source of truth, and a
+   rename here means every future page port has to be re-derived. */
+
+:root {
+  --font-sans: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* dark — the default */
+  --bg: #0a0c0e;
+  --bg-elevated: #131619;
+  --bg-sunken: #08090b;
+  --bg-hover: #1b1f23;
+  --border: #22262b;
+  --border-strong: #343a40;
+  --text: #e4e7ea;
+  --text-dim: #98a1a8;
+  --text-faint: #5c646b;
+  --accent: oklch(0.72 0.1 195);
+  --accent-fg: #06181c;
+  --sev-critical-bg: oklch(0.4 0.16 27);
+  --sev-critical-fg: oklch(0.97 0.02 60);
+  --sev-critical-bg-subtle: oklch(0.22 0.07 27);
+  --sev-high-bg: oklch(0.24 0.05 55);
+  --sev-high-fg: oklch(0.78 0.14 55);
+  --sev-high-border: oklch(0.6 0.14 55);
+  --sev-medium-bg: oklch(0.22 0.04 240);
+  --sev-medium-fg: oklch(0.75 0.09 240);
+  --sev-medium-border: oklch(0.55 0.09 240);
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #f6f6f4;
+  --bg-elevated: #ffffff;
+  --bg-sunken: #ececea;
+  --bg-hover: #eeeeec;
+  --border: #dcdcd8;
+  --border-strong: #c2c2bc;
+  --text: #1b1d1f;
+  --text-dim: #5c6166;
+  --text-faint: #8b9095;
+  --accent: oklch(0.5 0.11 195);
+  --accent-fg: #ffffff;
+  --sev-critical-bg: oklch(0.47 0.18 27);
+  --sev-critical-fg: #ffffff;
+  --sev-critical-bg-subtle: oklch(0.95 0.045 27);
+  --sev-high-bg: oklch(0.93 0.05 55);
+  --sev-high-fg: oklch(0.38 0.13 55);
+  --sev-high-border: oklch(0.55 0.13 55);
+  --sev-medium-bg: oklch(0.93 0.03 240);
+  --sev-medium-fg: oklch(0.4 0.09 240);
+  --sev-medium-border: oklch(0.5 0.09 240);
+
+  color-scheme: light;
+}
+
+/* Keyframes from the design's <helmet> block. */
+@keyframes pw-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .3 } }
+@keyframes pw-fade-in { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }
+@keyframes pw-row-in { from { opacity: 0; transform: translateY(-5px) } to { opacity: 1; transform: none } }
+@keyframes pw-expand { from { opacity: 0; transform: translateY(-3px) } to { opacity: 1; transform: none } }
+@keyframes pw-bar-grow { from { transform: scaleX(0) } to { transform: scaleX(1) } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

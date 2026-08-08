@@ -1,0 +1,19 @@
+{{/*
+  Severity badge. Takes {Tier, Size}.
+
+  Each tier carries its own glyph — triangle, diamond, circle, square — so the
+  badge is legible without colour. Do not collapse these into coloured pills.
+*/}}
+{{define "severity-badge"}}
+<span class="pw-badge pw-badge-{{.Tier}} pw-badge-{{.Size}}">
+  {{if eq .Tier "critical"}}
+    <svg width="9" height="9" viewBox="0 0 10 10" style="flex:none" aria-hidden="true"><polygon points="5,0 10,9 0,9" fill="currentColor"></polygon></svg>Critical
+  {{else if eq .Tier "high"}}
+    <svg width="9" height="9" viewBox="0 0 10 10" style="flex:none" aria-hidden="true"><polygon points="5,0.5 9.5,5 5,9.5 0.5,5" fill="none" stroke="currentColor" stroke-width="1.2"></polygon></svg>High
+  {{else if eq .Tier "medium"}}
+    <svg width="9" height="9" viewBox="0 0 10 10" style="flex:none" aria-hidden="true"><circle cx="5" cy="5" r="4.1" fill="none" stroke="currentColor" stroke-width="1.2"></circle></svg>Medium
+  {{else}}
+    <svg width="8" height="8" viewBox="0 0 10 10" style="flex:none" aria-hidden="true"><rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.2"></rect></svg>Low
+  {{end}}
+</span>
+{{end}}
