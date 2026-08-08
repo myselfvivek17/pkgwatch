@@ -89,7 +89,7 @@ CVSS base scores are computed from the vector strings OSV publishes, falling bac
 
 ## Build
 
-Requires Go 1.23+. Everything builds with `CGO_ENABLED=0` — that is what keeps cross-compiling all six targets from one machine trivial, and it is why the SQLite driver is `modernc.org/sqlite` rather than `mattn/go-sqlite3`.
+Requires the Go version in `go.mod` (currently 1.25, raised by `golang.org/x/sys`, not by anything here). Everything builds with `CGO_ENABLED=0` — that is what keeps cross-compiling all six targets from one machine trivial, and it is why the SQLite driver is `modernc.org/sqlite` rather than `mattn/go-sqlite3`.
 
 ```sh
 CGO_ENABLED=0 go build -o dist/pkgwatch ./cmd/pkgwatch
