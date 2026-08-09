@@ -218,22 +218,36 @@ func (n *NPM) filterPackument(name string, body []byte) ([]byte, error) {
 		}
 	}
 
-	removed := map[string]Verdict{}
-	for version, entry := range versions {
-		verdict := n.Gate.Evaluate(Request{
+	// Evaluate the whole list in one call. The publish buffer can only be
+	// decided with every version in hand — holding back a fresh release is safe
+	// only if an older one survives.
+	order := make([]string, 0, len(versions))
+	for version := range versions {
+		order = append(order, version)
+	}
+	sort.Strings(order) // deterministic, so a rebuilt packument is reproducible
+
+	reqs := make([]Request, len(order))
+	for i, version := range order {
+		reqs[i] = Request{
 			SessionID: n.SessionID,
 			Ecosystem: match.EcosystemNPM,
 			Name:      name,
 			Version:   version,
 			Point:     PointResolve,
 			Published: published[version],
-		})
+		}
+	}
+
+	removed := map[string]Verdict{}
+	for i, verdict := range n.Gate.EvaluateSet(reqs) {
+		version := order[i]
 		if verdict.Blocked {
 			removed[version] = verdict
 			delete(versions, version)
 			continue
 		}
-		if rewritten, ok := n.rewriteTarball(entry); ok {
+		if rewritten, ok := n.rewriteTarball(versions[version]); ok {
 			versions[version] = rewritten
 		}
 	}
@@ -246,12 +260,17 @@ func (n *NPM) filterPackument(name string, body []byte) ([]byte, error) {
 	// buries npm's own output under the gate's bookkeeping.
 	if len(removed) > 0 {
 		advisories := map[string]struct{}{}
+		buffered := 0
 		for _, verdict := range removed {
+			if verdict.Reason == ReasonCooldown {
+				buffered++
+				continue
+			}
 			advisories[verdict.AdvisoryID] = struct{}{}
 		}
 		slog.Info("npm gate: versions withheld from resolution",
 			"package", name, "withheld", len(removed), "offered", len(versions),
-			"advisories", len(advisories))
+			"advisories", len(advisories), "too_new", buffered)
 
 		ids := make([]string, 0, len(advisories))
 		for id := range advisories {
@@ -263,6 +282,7 @@ func (n *NPM) filterPackument(name string, body []byte) ([]byte, error) {
 				"withheld":   len(removed),
 				"offered":    len(versions),
 				"advisories": ids,
+				"too_new":    buffered,
 				"session_id": n.SessionID,
 			})
 	}

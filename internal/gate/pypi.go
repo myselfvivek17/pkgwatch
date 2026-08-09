@@ -3,6 +3,7 @@ package gate
 import (
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -155,19 +156,24 @@ func (p *PyPI) filterJSON(name string, body []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	kept := make([]map[string]any, 0, len(listing.Files))
-	dropped := 0
-	for _, file := range listing.Files {
-		filename, _ := file["filename"].(string)
-		// PEP 700 publishes upload-time, which is what makes the cooldown check
+	filenames := make([]string, len(listing.Files))
+	uploaded := make([]time.Time, len(listing.Files))
+	for i, file := range listing.Files {
+		filenames[i], _ = file["filename"].(string)
+		// PEP 700 publishes upload-time, which is what makes the publish buffer
 		// possible on the Python side at all.
-		var published time.Time
 		if stamp, ok := file["upload-time"].(string); ok {
 			if at, err := time.Parse(time.RFC3339, stamp); err == nil {
-				published = at
+				uploaded[i] = at
 			}
 		}
-		if p.blocks(name, filename, published) {
+	}
+
+	withheld := p.withhold(name, filenames, uploaded)
+	kept := make([]map[string]any, 0, len(listing.Files))
+	dropped := 0
+	for i, file := range listing.Files {
+		if withheld[i] {
 			dropped++
 			continue
 		}
@@ -195,44 +201,76 @@ var anchorPattern = regexp.MustCompile(`(?is)<a\s[^>]*>.*?</a>`)
 var anchorText = regexp.MustCompile(`(?is)<a\s[^>]*>(.*?)</a>`)
 
 func (p *PyPI) filterHTML(name string, body []byte) []byte {
-	return anchorPattern.ReplaceAllFunc(body, func(anchor []byte) []byte {
-		groups := anchorText.FindSubmatch(anchor)
-		if len(groups) < 2 {
-			return anchor
+	anchors := anchorPattern.FindAll(body, -1)
+	filenames := make([]string, len(anchors))
+	for i, anchor := range anchors {
+		if groups := anchorText.FindSubmatch(anchor); len(groups) >= 2 {
+			filenames[i] = strings.TrimSpace(string(groups[1]))
 		}
-		filename := strings.TrimSpace(string(groups[1]))
-		// The HTML listing carries no upload time, so cooldown does not apply
-		// here. PEP 691's JSON does.
-		if p.blocks(name, filename, time.Time{}) {
+	}
+
+	// The classic HTML listing carries no upload time, so the publish buffer
+	// cannot be applied to it at all. Say so rather than let a page silently
+	// skip a check the JSON index would have run.
+	if p.Gate.Cooldown > 0 {
+		slog.Warn("pypi gate: publish buffer not applied — this index serves PEP 503 HTML, "+
+			"which carries no upload times", "package", name)
+	}
+
+	withheld := p.withhold(name, filenames, make([]time.Time, len(anchors)))
+
+	i := -1
+	return anchorPattern.ReplaceAllFunc(body, func(anchor []byte) []byte {
+		i++
+		if i < len(withheld) && withheld[i] {
 			return nil
 		}
 		return anchor
 	})
 }
 
-// blocks evaluates one distribution file and reports whether to withhold it.
-func (p *PyPI) blocks(name, filename string, published time.Time) bool {
-	version := versionFromPyPIFile(name, filename)
-	if version == "" {
-		// Unrecognised filename shape. Withholding it would break installs for a
-		// reason we cannot state; allowing it silently would be a hole. Allow,
-		// and record that this file went unevaluated.
-		p.Gate.degrade(Request{SessionID: p.SessionID, Ecosystem: match.EcosystemPyPI, Name: name},
-			"filename "+filename+" does not encode a version")
-		return false
+// withhold decides, for one package's whole file listing, which files to keep
+// out of the index.
+//
+// The listing is evaluated in a single call because the publish buffer needs
+// every version at once: a release published an hour ago is only safe to hold
+// back if an older one survives to install instead.
+func (p *PyPI) withhold(name string, filenames []string, uploaded []time.Time) []bool {
+	out := make([]bool, len(filenames))
+
+	// Files whose version cannot be read are not evaluated at all. They keep
+	// their place in the listing — withholding one would break an install for a
+	// reason we could not state — and each is recorded as unevaluated.
+	var reqs []Request
+	index := make([]int, 0, len(filenames))
+	for i, filename := range filenames {
+		version := versionFromPyPIFile(name, filename)
+		if version == "" {
+			p.Gate.degrade(Request{SessionID: p.SessionID, Ecosystem: match.EcosystemPyPI, Name: name},
+				"filename "+filename+" does not encode a version")
+			continue
+		}
+		// The index is the only place pip learns what exists, so this is a
+		// listing decision even when the version was pinned in a requirements
+		// file.
+		reqs = append(reqs, Request{
+			SessionID: p.SessionID,
+			Ecosystem: match.EcosystemPyPI,
+			Name:      name,
+			Version:   version,
+			Point:     PointResolve,
+			Published: uploaded[i],
+		})
+		index = append(index, i)
+	}
+	if len(reqs) == 0 {
+		return out
 	}
 
-	// The index is the only place pip learns what exists, so this is a listing
-	// decision even when the version was pinned in a requirements file.
-	verdict := p.Gate.Evaluate(Request{
-		SessionID: p.SessionID,
-		Ecosystem: match.EcosystemPyPI,
-		Name:      name,
-		Version:   version,
-		Point:     PointResolve,
-		Published: published,
-	})
-	return verdict.Blocked
+	for j, verdict := range p.Gate.EvaluateSet(reqs) {
+		out[index[j]] = verdict.Blocked
+	}
+	return out
 }
 
 // pypiExtensions are the distribution suffixes a simple index lists, longest

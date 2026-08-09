@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -107,7 +108,13 @@ func newNPMProxy(t *testing.T, upstream *upstreamRecorder) *httptest.Server {
 	t.Helper()
 
 	g := newGate(t, true)
-	g.Cooldown = 0 // the fixtures are years old; cooldown is tested separately
+	g.Cooldown = 0 // the fixtures are years old; the buffer is tested separately
+	return proxyOver(t, g, upstream)
+}
+
+// proxyOver fronts upstream with a gate the caller has configured.
+func proxyOver(t *testing.T, g *gate.Gate, upstream *upstreamRecorder) *httptest.Server {
+	t.Helper()
 
 	parsed, err := gate.ParseUpstream(upstream.URL)
 	if err != nil {
@@ -119,6 +126,33 @@ func newNPMProxy(t *testing.T, upstream *upstreamRecorder) *httptest.Server {
 	t.Cleanup(server.Close)
 	proxy.SelfURL = server.URL
 	return server
+}
+
+// packumentWithTimes builds a packument whose publish times the test controls,
+// which is what the publish buffer reads.
+func packumentWithTimes(name string, times map[string]string) string {
+	versions := make([]string, 0, len(times))
+	for version := range times {
+		versions = append(versions, version)
+	}
+	sort.Strings(versions)
+
+	var doc map[string]any
+	json.Unmarshal([]byte(packument(name, versions...)), &doc)
+	doc["time"] = times
+	encoded, _ := json.Marshal(doc)
+	return string(encoded)
+}
+
+// captureLogs redirects slog for the duration of one test and returns the sink.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+
+	var sink bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&sink, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	return &sink
 }
 
 func getJSON(t *testing.T, url string) (int, map[string]any) {
@@ -299,10 +333,7 @@ func TestAuthorizationIsForwardedAndNeverLogged(t *testing.T) {
 	})
 	proxy := newNPMProxy(t, upstream)
 
-	var logs bytes.Buffer
-	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	defer slog.SetDefault(previous)
+	logs := captureLogs(t)
 
 	req, err := http.NewRequest(http.MethodGet, proxy.URL+"/lodash", nil)
 	if err != nil {

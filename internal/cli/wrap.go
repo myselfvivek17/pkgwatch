@@ -307,26 +307,65 @@ func reportWithheld(w io.Writer, withheld []repo.Withheld, explainFailure bool) 
 		return
 	}
 
-	total := 0
+	total, tooNew := 0, 0
 	for _, item := range withheld {
 		total += item.Count
+		tooNew += item.TooNew
 	}
 
 	if !explainFailure {
-		fmt.Fprintf(w, "\npkgwatch withheld %d affected version(s) across %d package(s); "+
-			"resolution found clean ones.\n", total, len(withheld))
+		// "Affected" is a claim about an advisory. Versions held back by the
+		// buffer have nothing on file against them — that is the whole point of
+		// holding them — so do not describe them as if they did.
+		fmt.Fprintf(w, "\npkgwatch withheld %d version(s) across %d package(s)%s; "+
+			"resolution found others.\n", total, len(withheld), buffered(tooNew))
 		return
 	}
 
-	fmt.Fprintf(w, "\npkgwatch withheld %d affected version(s) from resolution:\n\n", total)
+	fmt.Fprintf(w, "\npkgwatch withheld %d version(s) from resolution:\n\n", total)
 	table := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(table, "  PACKAGE\tWITHHELD\tADVISORIES")
+	fmt.Fprintln(table, "  PACKAGE\tWITHHELD\tWHY")
 	for _, item := range withheld {
-		fmt.Fprintf(table, "  %s\t%d\t%s\n", item.PURLBase, item.Count,
-			strings.Join(item.Advisories, ", "))
+		fmt.Fprintf(table, "  %s\t%d\t%s\n", item.PURLBase, item.Count, withheldReason(item))
 	}
 	table.Flush()
 	fmt.Fprintln(w, "\n  If the version you asked for could not be found, this is why.")
+}
+
+// withheldReason explains one package's withholdings in a table cell.
+//
+// Advisories and the publish buffer are different statements. "We know this is
+// bad" and "this is too new for anyone to know yet" should never render as the
+// same line, least of all as an empty one.
+func withheldReason(item repo.Withheld) string {
+	buffered := ""
+	if item.TooNew > 0 {
+		buffered = fmt.Sprintf("%d published inside the buffer", item.TooNew)
+	}
+
+	switch {
+	case len(item.Advisories) == 0:
+		return orElse(buffered, "withheld")
+	case buffered == "":
+		return strings.Join(item.Advisories, ", ")
+	default:
+		return strings.Join(item.Advisories, ", ") + " · " + buffered
+	}
+}
+
+// buffered renders the "of which too new" clause, or nothing.
+func buffered(tooNew int) string {
+	if tooNew == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d too new to trust yet)", tooNew)
+}
+
+func orElse(s, fallback string) string {
+	if s == "" {
+		return fallback
+	}
+	return s
 }
 
 // promptOverride asks what to do and returns the purls the user approved.

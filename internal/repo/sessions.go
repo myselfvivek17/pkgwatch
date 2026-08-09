@@ -106,6 +106,12 @@ type Withheld struct {
 	PURLBase   string // ecosystem and name, no version
 	Count      int
 	Advisories []string
+
+	// TooNew counts versions held back only because they were published
+	// recently, with nothing on file against them. Those carry no advisory id,
+	// so without this the report would show a withheld count and an empty
+	// reason.
+	TooNew int
 }
 
 // SessionWithheld groups withheld versions by package.
@@ -114,9 +120,13 @@ type Withheld struct {
 // install", not "I accept version 3.5.0 specifically" — so the report and the
 // override prompt both work at package granularity.
 func (a Agent) SessionWithheld(sessionID string) ([]Withheld, error) {
+	// The version separator is the first literal '@': a scoped npm namespace is
+	// percent-encoded (pkg:npm/%40ctrl/tinycolor@4.1.2), so there is no earlier
+	// one to trip over.
 	rows, err := a.DB.Query(`SELECT
 			substr(purl, 1, instr(purl, '@' ) - 1) AS base,
-			COUNT(*), GROUP_CONCAT(DISTINCT advisory_id)
+			COUNT(*), GROUP_CONCAT(DISTINCT advisory_id),
+			SUM(CASE WHEN reason = 'cooldown' THEN 1 ELSE 0 END)
 		FROM install_decisions
 		WHERE session_id = ? AND decision = ?
 		GROUP BY base
@@ -130,7 +140,7 @@ func (a Agent) SessionWithheld(sessionID string) ([]Withheld, error) {
 	for rows.Next() {
 		var w Withheld
 		var advisories sql.NullString
-		if err := rows.Scan(&w.PURLBase, &w.Count, &advisories); err != nil {
+		if err := rows.Scan(&w.PURLBase, &w.Count, &advisories, &w.TooNew); err != nil {
 			return nil, err
 		}
 		if advisories.String != "" {

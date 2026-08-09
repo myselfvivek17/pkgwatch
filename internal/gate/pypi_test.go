@@ -54,6 +54,12 @@ func newPyPIProxy(t *testing.T, upstream *upstreamRecorder, extra ...match.Advis
 
 	g := newGateWith(t, true, extra...)
 	g.Cooldown = 0
+	return pypiProxyOver(t, g, upstream)
+}
+
+// pypiProxyOver fronts upstream with a gate the caller has configured.
+func pypiProxyOver(t *testing.T, g *gate.Gate, upstream *upstreamRecorder) *httptest.Server {
+	t.Helper()
 
 	parsed, err := gate.ParseUpstream(upstream.URL)
 	if err != nil {

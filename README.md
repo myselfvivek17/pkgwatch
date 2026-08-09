@@ -119,6 +119,47 @@ packument or a panic in a comparator allows the install and writes a
 `gate_degraded` event. A gate that is silently not gating reads as protection and
 is worse than no gate at all.
 
+### The publish buffer
+
+Everything above depends on someone already knowing a package is bad. Advisories
+postdate the attacks they describe, so a compromised release is
+indistinguishable from a good one for its first hours — which is exactly when it
+gets installed. The buffer is the only defence here that needs no knowledge at
+all: **wait.**
+
+A version published more recently than `cooldown_hours` (default **72**) is
+withheld from resolution, so the resolver settles on the previous one. Nothing
+fails, nothing prompts:
+
+```
+$ pkgwatch npm install chalk
+added 1 package in 1s
+
+pkgwatch withheld 3 version(s) across 1 package(s) (3 too new to trust yet);
+resolution found others.
+```
+
+Two rules keep it safe to leave switched on:
+
+**The buffer never leaves you with nothing.** A security patch is also a brand
+new release — holding it back would strand the resolver on the version it fixes,
+which the gate then withholds as vulnerable, so nothing survives and the install
+fails. So the buffer only applies when something older and unflagged remains.
+A brand new package, or one whose every release is recent, installs normally.
+That rule needs the whole version list at once, which is why the gate evaluates a
+package's versions as a set rather than one at a time.
+
+**The buffer belongs to resolution, not download.** A lockfile pinning a fresh
+version passes through — it is a record of a decision already made, and refusing
+it would break `npm ci` and every CI job that depends on it.
+
+Two limits worth knowing: a semver range that only fresh versions satisfy
+(`chalk@^6` when all of 6.x is inside the buffer) fails rather than falling back,
+because no older version matches what you asked for. And the buffer needs publish
+times, which the PEP 503 HTML index does not carry — pip's PEP 691 JSON index
+does, and pkgwatch logs a warning rather than skipping the check silently when it
+meets the old format.
+
 `block_tier` defaults to `high`. npm's corpus has a low or medium advisory
 against a large share of transitive dependencies, and a gate that fires on all of
 them gets switched off within a week. Malware always blocks regardless of the

@@ -52,6 +52,12 @@ func Root() *cobra.Command {
 		Version:       fmt.Sprintf("%s (%s)", buildinfo.Version, buildinfo.Commit),
 		RunE:          func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 		SilenceErrors: false,
+
+		// The wrapper commands set DisableFlagParsing so that every flag belongs
+		// to npm or pip. Without traversal cobra would then hand them --config
+		// too, and `pkgwatch --config x npm install` would silently run with the
+		// default configuration while passing a stray argument to npm.
+		TraverseChildren: true,
 	}
 	root.PersistentFlags().StringVar(&configPath, "config", "", "path to pkgwatch.toml (default: <data dir>/pkgwatch.toml)")
 

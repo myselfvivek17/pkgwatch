@@ -31,12 +31,23 @@ type AgentConfig struct {
 	PyPIPort      int    `toml:"pypi_port"`
 	DashboardPort int    `toml:"dashboard_port"`
 
-	// CooldownHours treats any version published more recently than this as
-	// prompt-worthy regardless of advisories — advisories lag attacks (§5.1).
+	// CooldownHours is the publish buffer: a version released more recently than
+	// this is withheld from resolution, so the resolver settles on the previous
+	// one (§5.1).
+	//
+	// This is the only defence that needs no knowledge at all, and it covers the
+	// window nothing else can. Every advisory postdates the attack it describes,
+	// so a compromised release is indistinguishable from a good one for its first
+	// hours — which is exactly when it is being installed.
+	//
+	// Three days by default: long enough that most compromises are caught and
+	// pulled, short enough to be worth leaving switched on. The buffer never
+	// applies when nothing older survives, so a brand new package and a security
+	// patch both still install.
 	//
 	// Non-zero also makes the npm gate request full packuments rather than the
 	// abbreviated ones npm asks for, because only the full document carries
-	// publish times. Set to 0 for smaller registry responses and no cooldown.
+	// publish times. Set to 0 for smaller registry responses and no buffer.
 	CooldownHours int `toml:"cooldown_hours"`
 
 	// BlockTier is the lowest finding tier that stops an install. Malware always
@@ -77,7 +88,7 @@ func Default() Config {
 			NPMPort:       DefaultNPMPort,
 			PyPIPort:      DefaultPyPIPort,
 			DashboardPort: DefaultDashboardPort,
-			CooldownHours: 24,
+			CooldownHours: 72,
 			BlockTier:     "high",
 			SyncLevel:     "findings",
 		},

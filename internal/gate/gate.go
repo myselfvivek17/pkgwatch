@@ -134,10 +134,67 @@ func (g *Gate) now() time.Time {
 //
 // It never returns an error: there is no caller that could do anything useful
 // with one. Anything that goes wrong becomes a degraded verdict.
+//
+// A single request can never trigger the publish buffer — holding a fresh
+// release back is only safe when an older one survives to fall back to, and one
+// request is not a version list. That is deliberate: it is what keeps the buffer
+// off the download path, where a lockfile has already recorded a decision.
 func (g *Gate) Evaluate(req Request) Verdict {
-	started := g.now()
-	verdict := g.decide(req)
+	return g.EvaluateSet([]Request{req})[0]
+}
 
+// EvaluateSet answers for a whole package's version list at once and records
+// every decision.
+//
+// Some rules cannot be decided one version at a time. The publish buffer is
+// one: a release published an hour ago is worth holding back, but only if
+// something older survives to install instead — otherwise the buffer becomes
+// the reason nothing can be installed at all. Only a caller holding the full
+// list can know that, so the rule lives here rather than in each proxy.
+func (g *Gate) EvaluateSet(reqs []Request) []Verdict {
+	started := make([]time.Time, len(reqs))
+	verdicts := make([]Verdict, len(reqs))
+	for i, req := range reqs {
+		started[i] = g.now()
+		verdicts[i] = g.decide(req)
+	}
+
+	applyBuffer(verdicts)
+
+	for i, req := range reqs {
+		g.record(req, verdicts[i], started[i])
+	}
+	return verdicts
+}
+
+// applyBuffer turns cooldown warnings into withholdings, but only when the
+// version list has something clean and settled to fall back to.
+//
+// The case this guards against is a security patch, which is also a brand new
+// release. Holding it back would leave the resolver on the version it fixes —
+// which the gate then withholds as vulnerable, so nothing survives and the
+// install fails. A buffer must never be the reason there is nothing left.
+func applyBuffer(verdicts []Verdict) {
+	fallback := false
+	for _, v := range verdicts {
+		if !v.Blocked && v.Reason != ReasonCooldown {
+			fallback = true
+			break
+		}
+	}
+	if !fallback {
+		return
+	}
+
+	for i, v := range verdicts {
+		if !v.Blocked && v.Reason == ReasonCooldown {
+			verdicts[i].Blocked = true
+			verdicts[i].Warn = false
+		}
+	}
+}
+
+func (g *Gate) record(req Request, verdict Verdict, started time.Time) {
 	purl := PURL(req.Ecosystem, req.Name, req.Version)
 	decision := repo.DecisionAllowed
 	switch {
@@ -175,10 +232,9 @@ func (g *Gate) Evaluate(req Request) Verdict {
 			"fixed_in":   verdict.FixedIn,
 		})
 	}
-	return verdict
 }
 
-// decide is the evaluation proper, with recording left to Evaluate.
+// decide is the evaluation proper, with recording left to EvaluateSet.
 func (g *Gate) decide(req Request) (verdict Verdict) {
 	// A panic in a version comparator must not take the install down with it.
 	// Fail open, and say so.
@@ -262,13 +318,19 @@ func (g *Gate) decide(req Request) (verdict Verdict) {
 		return worst
 	}
 
-	// Nothing on file. That is exactly when a version published an hour ago is
-	// worth a second look: the compromised release always predates its advisory.
+	// Nothing on file — which is exactly the state a compromised release is in
+	// for its first hours. Every advisory postdates the attack it describes, so
+	// "nothing known" is the strongest signal available during the window that
+	// matters most, and the only defence that needs no knowledge at all is to
+	// wait (§5.1).
+	//
+	// This returns a warning, not a block. Whether it becomes a withholding is
+	// decided in applyBuffer, which can see whether anything older survives.
 	if g.Cooldown > 0 && !req.Published.IsZero() && g.now().Sub(req.Published) < g.Cooldown {
 		return Verdict{
 			Warn:   true,
 			Reason: ReasonCooldown,
-			Summary: fmt.Sprintf("published %s ago, inside the %s cooldown",
+			Summary: fmt.Sprintf("published %s ago, inside the %s publish buffer",
 				roundDuration(g.now().Sub(req.Published)), roundDuration(g.Cooldown)),
 		}
 	}
