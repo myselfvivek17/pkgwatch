@@ -42,7 +42,13 @@ func Open(cfg config.Config) (*Gate, error) {
 }
 
 // New wires a gate over an already-open handle, for callers that have one.
-// Callers that know the bundle's coverage should set Covered.
+//
+// It leaves Covered empty, which disables the coverage check — every ecosystem
+// is then treated as covered. That is the wrong default for anything shipping:
+// a bundle built without an ecosystem's feed returns zero rows for it, which
+// reads as clean. Callers that are not Open must set Covered from
+// repo.Bundle(...).Ecosystems. M3's retroactive watcher is the next one that
+// will need to.
 func New(handle *sql.DB, cfg config.Config, bundleAttached bool) *Gate {
 	return &Gate{
 		DB:             handle,
