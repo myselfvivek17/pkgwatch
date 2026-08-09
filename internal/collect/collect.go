@@ -57,6 +57,11 @@ type Result struct {
 	// what the last scan recorded.
 	Unchanged int
 
+	// ContainersScanned is true when the Docker collector reached the engine and
+	// listed containers. Without it, a scan cannot tell "this container is gone"
+	// from "Docker was down when we looked".
+	ContainersScanned bool
+
 	// Gone counts inventory rows retired because the package is no longer
 	// installed. Filled in by the caller, which is what reconciles against the
 	// filesystem.
@@ -76,6 +81,7 @@ func (r *Result) Merge(other Result) {
 	r.Skipped += other.Skipped
 	r.Unchanged += other.Unchanged
 	r.Copies += other.Copies
+	r.ContainersScanned = r.ContainersScanned || other.ContainersScanned
 }
 
 // Known is the mtime of every install directory the last scan recorded, keyed

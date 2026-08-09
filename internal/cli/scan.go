@@ -118,7 +118,7 @@ func runScan(cmd *cobra.Command, cfg config.Config, paths []string, full bool) e
 		return fmt.Errorf("record inventory: %w", err)
 	}
 
-	gone, err := reconcilePresence(store, scanAt)
+	gone, err := reconcilePresence(store, scanAt, result.ContainersScanned)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func runScan(cmd *cobra.Command, cfg config.Config, paths []string, full bool) e
 //
 // Nothing is deleted either way. The row is flagged, so the timeline can still
 // answer what this machine was carrying when an advisory landed.
-func reconcilePresence(store repo.Agent, scanAt time.Time) (int, error) {
+func reconcilePresence(store repo.Agent, scanAt time.Time, containersScanned bool) (int, error) {
 	superseded, err := store.MarkSuperseded(scanAt)
 	if err != nil {
 		return 0, fmt.Errorf("retire replaced packages: %w", err)
@@ -162,15 +162,29 @@ func reconcilePresence(store repo.Agent, scanAt time.Time) (int, error) {
 		return 0, err
 	}
 
-	// Stat rather than rescan. The inventory is a few thousand rows and a stat
-	// apiece is milliseconds, where re-walking every project tree to find out
-	// what is missing would cost seconds — and a scan that only covered one
-	// project must not conclude that everything else was uninstalled.
 	var missing []string
 	for _, item := range present {
 		if item.InstallDir == "" {
 			continue
 		}
+
+		// A package inside a container has no path on this filesystem —
+		// InstallDir names the container. The only evidence of its presence is
+		// whether this scan found it, and that is only usable when the Docker
+		// collector actually ran: an engine that was down for one scan must not
+		// make every container look emptied.
+		if item.Scope == match.ScopeContainer {
+			if containersScanned && item.LastSeen < scanAt.Unix() {
+				missing = append(missing, item.PURL)
+			}
+			continue
+		}
+
+		// Everything else is stat-checked rather than rescanned. The inventory
+		// is a few thousand rows and a stat apiece is milliseconds, where
+		// re-walking every project tree to find out what is missing would cost
+		// seconds — and a scan that only covered one project must not conclude
+		// that everything else was uninstalled.
 		if _, err := os.Stat(item.InstallDir); os.IsNotExist(err) {
 			missing = append(missing, item.PURL)
 		}

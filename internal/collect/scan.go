@@ -43,6 +43,11 @@ func Global(known Known) Result {
 		slog.Debug("collect: site-packages", "path", sitePackages)
 		out.Merge(Python(sitePackages, match.ScopeSystem, known))
 	}
+
+	// Containers are machine-wide too, and they are where the distribution
+	// advisories finally have something to match against. Absent Docker is a
+	// no-op.
+	out.Merge(Docker(known))
 	return out
 }
 

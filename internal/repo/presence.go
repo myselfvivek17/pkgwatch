@@ -6,10 +6,16 @@ import (
 	"github.com/myselfvivek17/pkgwatch/internal/match"
 )
 
-// Installed is a package the inventory currently believes is on disk.
+// Installed is a package the inventory currently believes is present.
 type Installed struct {
 	PURL       string
 	InstallDir string
+	Scope      string
+
+	// LastSeen is when a scan last found it. For packages inside containers it
+	// is the only evidence available: InstallDir names a container rather than a
+	// directory, so there is nothing on this filesystem to stat.
+	LastSeen int64
 }
 
 // Present lists packages the inventory has not marked gone.
@@ -20,7 +26,7 @@ type Installed struct {
 // exactly like a compromised machine.
 func (a Agent) Present() ([]Installed, error) {
 	rows, err := a.DB.Query(
-		"SELECT purl, install_path FROM packages WHERE gone_at IS NULL")
+		"SELECT purl, install_path, scope, last_seen FROM packages WHERE gone_at IS NULL")
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +35,7 @@ func (a Agent) Present() ([]Installed, error) {
 	var out []Installed
 	for rows.Next() {
 		var item Installed
-		if err := rows.Scan(&item.PURL, &item.InstallDir); err != nil {
+		if err := rows.Scan(&item.PURL, &item.InstallDir, &item.Scope, &item.LastSeen); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
