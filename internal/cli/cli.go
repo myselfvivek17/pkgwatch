@@ -201,7 +201,10 @@ func printStatus(cmd *cobra.Command, cfg config.Config) error {
 		// Coverage, not just volume. A half-million records means nothing if the
 		// ecosystem you install from is not among them.
 		if len(st.Bundle.Ecosystems) > 0 {
-			fmt.Fprintf(w, "covers\t%s\n", strings.Join(st.Bundle.Ecosystems, ", "))
+			// Collapsed to distinct ecosystems. Six Debian and Alpine releases are
+			// a long line and a short fact; the full per-release list is what the
+			// matching uses, not what a person needs to read.
+			fmt.Fprintf(w, "covers\t%s\n", strings.Join(st.Bundle.CoveredBases(), ", "))
 			for _, gated := range []string{match.EcosystemNPM, match.EcosystemPyPI} {
 				if !st.Bundle.Covers(gated) {
 					fmt.Fprintf(w, "\tWARNING: %s installs are gated but this bundle has no %s advisories\n",
