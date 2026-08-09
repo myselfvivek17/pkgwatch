@@ -75,7 +75,7 @@ func Root() *cobra.Command {
 		checkCmd(),
 		publishCmd(),
 
-		stub("findings", "List findings", "M3", cobra.NoArgs),
+		findingsCmd(),
 		stub("ack <purl> <advisory-id>", "Acknowledge a finding", "M3", cobra.ExactArgs(2)),
 		ignoreCmd(),
 		stub("quarantine <purl>", "Quarantine an installed package", "M6", cobra.ExactArgs(1)),

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"text/tabwriter"
@@ -9,9 +10,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/myselfvivek17/pkgwatch/internal/agent"
 	"github.com/myselfvivek17/pkgwatch/internal/collect"
 	"github.com/myselfvivek17/pkgwatch/internal/config"
-	"github.com/myselfvivek17/pkgwatch/internal/db"
 	"github.com/myselfvivek17/pkgwatch/internal/match"
 	"github.com/myselfvivek17/pkgwatch/internal/repo"
 )
@@ -45,12 +46,14 @@ func scanCmd() *cobra.Command {
 }
 
 func runScan(cmd *cobra.Command, cfg config.Config, paths []string, full bool) error {
-	handle, err := db.Open(cfg.AgentDBPath(), db.SchemaAgent)
+	// agent.Open rather than a bare db.Open: it attaches the advisory bundle,
+	// which the matching pass at the end of this scan needs.
+	st, err := agent.Open(cfg)
 	if err != nil {
 		return err
 	}
-	defer handle.Close()
-	store := repo.Agent{DB: handle}
+	defer st.Close()
+	store := st.Repo
 
 	var known collect.Known
 	if !full {
@@ -109,16 +112,77 @@ func runScan(cmd *cobra.Command, cfg config.Config, paths []string, full bool) e
 	}
 	result.Copies = copies
 
-	inserted, updated, err := store.UpsertPackages(rows, time.Now())
+	scanAt := time.Now()
+	inserted, updated, err := store.UpsertPackages(rows, scanAt)
 	if err != nil {
 		return fmt.Errorf("record inventory: %w", err)
 	}
 
-	return reportScan(cmd, store, result, inserted, updated, time.Since(started))
+	gone, err := reconcilePresence(store, scanAt)
+	if err != nil {
+		return err
+	}
+	result.Gone = gone
+
+	pruned, err := store.Prune(time.Duration(cfg.Agent.HistoryDays)*24*time.Hour,
+		cfg.Agent.HubURL != "", scanAt)
+	if err != nil {
+		return fmt.Errorf("apply retention: %w", err)
+	}
+
+	if err := reportScan(cmd, store, result, inserted, updated, pruned, time.Since(started)); err != nil {
+		return err
+	}
+
+	// Match immediately. A scan that records an inventory and stops leaves the
+	// user to work out for themselves that a second command is what turns it
+	// into an answer.
+	return runWatch(cmd, st, scanAt)
+}
+
+// reconcilePresence retires inventory rows for packages that are no longer
+// installed, and returns how many.
+//
+// Two ways a package stops being installed, and both have to be caught. Its
+// directory can disappear — an uninstall, or a deleted project. Or it can be
+// upgraded in place, leaving a directory that still exists but now holds a
+// different version, which a filesystem check alone would happily keep calling
+// installed.
+//
+// Nothing is deleted either way. The row is flagged, so the timeline can still
+// answer what this machine was carrying when an advisory landed.
+func reconcilePresence(store repo.Agent, scanAt time.Time) (int, error) {
+	superseded, err := store.MarkSuperseded(scanAt)
+	if err != nil {
+		return 0, fmt.Errorf("retire replaced packages: %w", err)
+	}
+
+	present, err := store.Present()
+	if err != nil {
+		return 0, err
+	}
+
+	// Stat rather than rescan. The inventory is a few thousand rows and a stat
+	// apiece is milliseconds, where re-walking every project tree to find out
+	// what is missing would cost seconds — and a scan that only covered one
+	// project must not conclude that everything else was uninstalled.
+	var missing []string
+	for _, item := range present {
+		if item.InstallDir == "" {
+			continue
+		}
+		if _, err := os.Stat(item.InstallDir); os.IsNotExist(err) {
+			missing = append(missing, item.PURL)
+		}
+	}
+	if err := store.MarkGone(missing, scanAt); err != nil {
+		return 0, fmt.Errorf("retire uninstalled packages: %w", err)
+	}
+	return superseded + len(missing), nil
 }
 
 func reportScan(cmd *cobra.Command, store repo.Agent, result collect.Result,
-	inserted, updated int, elapsed time.Duration) error {
+	inserted, updated int, pruned repo.Pruned, elapsed time.Duration) error {
 
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "scanned in %s — %d new, %d seen again, %d unchanged since last scan%s\n",
@@ -128,6 +192,13 @@ func reportScan(cmd *cobra.Command, store repo.Agent, result collect.Result,
 	// clean machine, so say what could not be read.
 	if result.Skipped > 0 {
 		fmt.Fprintf(out, "%d directory(ies) looked like packages but could not be read\n", result.Skipped)
+	}
+	if result.Gone > 0 {
+		fmt.Fprintf(out, "%d no longer installed — kept as history, no longer matched\n", result.Gone)
+	}
+	if pruned.Any() {
+		fmt.Fprintf(out, "retention: removed %d routine decision(s), %d event(s), %d session(s)\n",
+			pruned.RoutineDecisions, pruned.Events, pruned.Sessions)
 	}
 
 	counts, err := store.EcosystemCounts()
@@ -153,7 +224,6 @@ func reportScan(cmd *cobra.Command, store repo.Agent, result collect.Result,
 	}
 	table.Flush()
 
-	fmt.Fprintln(out, "\nMatching the inventory against advisories lands next in M3.")
 	return nil
 }
 

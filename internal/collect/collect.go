@@ -57,6 +57,11 @@ type Result struct {
 	// what the last scan recorded.
 	Unchanged int
 
+	// Gone counts inventory rows retired because the package is no longer
+	// installed. Filled in by the caller, which is what reconciles against the
+	// filesystem.
+	Gone int
+
 	// Copies counts installs collapsed into a row that already existed — the
 	// same version present in more than one place. Filled in by the caller that
 	// does the collapsing, since the inventory's key is what decides it.

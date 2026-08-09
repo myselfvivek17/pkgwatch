@@ -21,21 +21,30 @@ func TestOpenAppliesSchemaAndIsIdempotent(t *testing.T) {
 			t.Errorf("table %s missing after migration: %v", table, err)
 		}
 	}
+	var first int
+	if err := handle.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	if first == 0 {
+		t.Fatal("no migrations were applied")
+	}
 	handle.Close()
 
-	// Re-opening must not try to re-apply migration 001.
+	// Re-opening must not re-apply anything. Asserted as a stable count rather
+	// than a fixed number: the property is idempotency, and pinning the number
+	// means every new migration breaks a test that has nothing to do with it.
 	handle, err = Open(path, SchemaAgent)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer handle.Close()
 
-	var applied int
-	if err := handle.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&applied); err != nil {
+	var second int
+	if err := handle.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&second); err != nil {
 		t.Fatal(err)
 	}
-	if applied != 1 {
-		t.Errorf("schema_migrations = %d rows, want 1", applied)
+	if second != first {
+		t.Errorf("schema_migrations went from %d to %d rows on reopen", first, second)
 	}
 }
 

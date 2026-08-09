@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/myselfvivek17/pkgwatch/internal/agent"
 	"github.com/myselfvivek17/pkgwatch/internal/bundle"
 	"github.com/myselfvivek17/pkgwatch/internal/config"
 	"github.com/myselfvivek17/pkgwatch/internal/db"
@@ -44,7 +46,20 @@ func syncCmd() *cobra.Command {
 			if sigPath == "" {
 				sigPath = fromFile + ".sig"
 			}
-			return installBundle(cmd, cfg, fromFile, manifestPath, sigPath, allowDowngrade)
+			if err := installBundle(cmd, cfg, fromFile, manifestPath, sigPath, allowDowngrade); err != nil {
+				return err
+			}
+
+			// A new bundle is one of the two events that can change what is true
+			// about an already-installed package — the other is a scan. Matching
+			// here is what turns "an advisory landed this morning" into a finding
+			// without waiting for the user to think of running something else.
+			st, err := agent.Open(cfg)
+			if err != nil {
+				return err
+			}
+			defer st.Close()
+			return runWatch(cmd, st, time.Now())
 		},
 	}
 

@@ -63,6 +63,15 @@ type AgentConfig struct {
 	NPMUpstream  string `toml:"npm_upstream"`
 	PyPIUpstream string `toml:"pypi_upstream"`
 
+	// HistoryDays is how long recorded verdicts and timeline events are kept.
+	//
+	// A single npm install writes roughly 1,200 gate decisions, so without a
+	// retention pass the audit trail outgrows everything else in the database by
+	// two orders of magnitude. Routine "allowed" decisions are bounded by recent
+	// session count instead; this window governs the verdicts that stopped
+	// something, which are what an incident is reconstructed from.
+	HistoryDays int `toml:"history_days"`
+
 	// SyncLevel is one of findings|full|off. Default findings: sending the full
 	// inventory hands the hub a map of exploitable software on every machine,
 	// which should be a conscious choice (§3.3).
@@ -90,6 +99,7 @@ func Default() Config {
 			DashboardPort: DefaultDashboardPort,
 			CooldownHours: 72,
 			BlockTier:     "high",
+			HistoryDays:   90,
 			SyncLevel:     "findings",
 		},
 		Hub: HubConfig{

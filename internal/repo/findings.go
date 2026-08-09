@@ -1,0 +1,158 @@
+package repo
+
+import (
+	"database/sql"
+	"time"
+)
+
+// Finding states.
+const (
+	StateNew          = "new"
+	StateNotified     = "notified"
+	StateAcknowledged = "acknowledged"
+	StateIgnored      = "ignored"
+	StateQuarantined  = "quarantined"
+	StateFixed        = "fixed"
+)
+
+// Finding is one advisory that applies to one installed package.
+type Finding struct {
+	PURL       string
+	AdvisoryID string
+	Score      float64
+	Tier       string
+	State      string
+	DetectedAt time.Time
+
+	// Summary and FixedIn come from the advisory bundle, not the findings table
+	// — they would be duplicated into every row for no gain, and the bundle is
+	// replaced wholesale on every sync.
+	Summary string
+	FixedIn string
+
+	// BaseCVSS is what the advisory itself rates, before install context is
+	// applied. Score is that number multiplied by scope and script factors, so
+	// the two differ routinely and showing only Score reads as a mistake.
+	BaseCVSS *float64
+}
+
+// RecordFindings inserts findings that are not already known.
+//
+// INSERT OR IGNORE against the (purl, advisory_id) primary key is what makes
+// this alert-once: the watcher runs after every scan and every bundle sync, and
+// a finding that re-notified on each pass would train you to ignore it.
+func (a Agent) RecordFindings(findings []Finding, at time.Time) (int, error) {
+	if len(findings) == 0 {
+		return 0, nil
+	}
+
+	tx, err := a.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO findings
+		(purl, advisory_id, score, tier, detected_at, state) VALUES (?,?,?,?,?,?)`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	added := 0
+	for _, finding := range findings {
+		result, err := stmt.Exec(finding.PURL, finding.AdvisoryID, finding.Score,
+			finding.Tier, at.Unix(), finding.State)
+		if err != nil {
+			return 0, err
+		}
+		if n, _ := result.RowsAffected(); n > 0 {
+			added++
+		}
+	}
+	return added, tx.Commit()
+}
+
+// HasFindings reports whether anything has ever been recorded.
+//
+// This is what decides a baseline run. A machine seeing its inventory matched
+// for the first time has years of accumulated low-severity findings that were
+// never news, and announcing all of them at once is how notifications get
+// switched off in week one.
+func (a Agent) HasFindings() (bool, error) {
+	var one int
+	err := a.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM findings)").Scan(&one)
+	return one == 1, err
+}
+
+// ResolveFindingsForGonePackages closes findings whose package is no longer
+// installed.
+//
+// Uninstalling is a fix. Leaving the finding open would keep a machine looking
+// dirty for something it no longer has, and an ignored one stays ignored
+// because that was a deliberate decision about a package, not about its state.
+func (a Agent) ResolveFindingsForGonePackages(at time.Time) (int, error) {
+	result, err := a.DB.Exec(`UPDATE findings SET state = ?
+		WHERE state NOT IN (?, ?)
+		  AND purl IN (SELECT purl FROM packages WHERE gone_at IS NOT NULL)`,
+		StateFixed, StateIgnored, StateFixed)
+	if err != nil {
+		return 0, err
+	}
+	return rowsAffected(result), nil
+}
+
+// OpenFindings returns findings that still want attention, worst first, with
+// the advisory text joined in from the attached bundle.
+//
+// attached says whether the advisory database is available. Without it the
+// findings are still listed — they are recorded facts — but with no summary,
+// because inventing one would be worse than an empty column.
+func (a Agent) OpenFindings(attached bool, limit int) ([]Finding, error) {
+	query := `SELECT f.purl, f.advisory_id, f.score, f.tier, f.state, f.detected_at, '', NULL
+		FROM findings f
+		WHERE f.state NOT IN ('ignored', 'fixed')
+		ORDER BY f.score DESC, f.purl LIMIT ?`
+	if attached {
+		// The advisory's own CVSS comes along for the ride. The stored score is
+		// contextual — install scope and lifecycle scripts multiply it (§5.2) —
+		// so a finding can sit two tiers above what the advisory itself rates,
+		// and showing only one of the two numbers makes that look like an error.
+		//
+		// MAX rather than a join: one advisory id covers several packages and
+		// would otherwise multiply the result set.
+		query = `SELECT f.purl, f.advisory_id, f.score, f.tier, f.state, f.detected_at,
+			COALESCE(t.summary, ''),
+			(SELECT MAX(a.severity_cvss) FROM adv.advisories a WHERE a.id = f.advisory_id)
+			FROM findings f
+			LEFT JOIN adv.advisory_text t ON t.id = f.advisory_id
+			WHERE f.state NOT IN ('ignored', 'fixed')
+			ORDER BY f.score DESC, f.purl LIMIT ?`
+	}
+
+	rows, err := a.DB.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Finding
+	for rows.Next() {
+		var finding Finding
+		var detectedAt int64
+		var summary sql.NullString
+		var baseCVSS sql.NullFloat64
+		if err := rows.Scan(&finding.PURL, &finding.AdvisoryID, &finding.Score,
+			&finding.Tier, &finding.State, &detectedAt, &summary, &baseCVSS); err != nil {
+			return nil, err
+		}
+		finding.DetectedAt = time.Unix(detectedAt, 0)
+		finding.Summary = summary.String
+		if baseCVSS.Valid {
+			score := baseCVSS.Float64
+			finding.BaseCVSS = &score
+		}
+		out = append(out, finding)
+	}
+	return out, rows.Err()
+}

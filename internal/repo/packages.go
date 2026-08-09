@@ -69,7 +69,11 @@ func (a Agent) UpsertPackages(packages []PackageRow, at time.Time) (inserted, up
 			install_path = excluded.install_path,
 			scope        = excluded.scope,
 			has_scripts  = excluded.has_scripts,
-			path_mtime   = excluded.path_mtime`)
+			path_mtime   = excluded.path_mtime,
+			-- Seeing it again is what makes it present, including after it was
+			-- previously marked gone: reinstalling a package must bring its row
+			-- back to life rather than leave it invisible to the watcher.
+			gone_at      = NULL`)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -124,7 +128,8 @@ func (a Agent) Packages(limit int) ([]PackageRow, error) {
 // EcosystemCounts reports how many packages are recorded per ecosystem — the
 // raw material for deciding which advisory feeds a machine actually needs.
 func (a Agent) EcosystemCounts() (map[string]int, error) {
-	rows, err := a.DB.Query("SELECT ecosystem, COUNT(*) FROM packages GROUP BY ecosystem")
+	rows, err := a.DB.Query(
+		"SELECT ecosystem, COUNT(*) FROM packages WHERE gone_at IS NULL GROUP BY ecosystem")
 	if err != nil {
 		return nil, err
 	}
