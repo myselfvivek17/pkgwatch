@@ -109,7 +109,7 @@ func (a Agent) ResolveFindingsForGonePackages(at time.Time) (int, error) {
 // findings are still listed — they are recorded facts — but with no summary,
 // because inventing one would be worse than an empty column.
 func (a Agent) OpenFindings(attached bool, limit int) ([]Finding, error) {
-	query := `SELECT f.purl, f.advisory_id, f.score, f.tier, f.state, f.detected_at, '', NULL
+	query := `SELECT f.purl, f.advisory_id, f.score, f.tier, f.state, f.detected_at, '', NULL, ''
 		FROM findings f
 		WHERE f.state NOT IN ('ignored', 'fixed')
 		ORDER BY f.score DESC, f.purl LIMIT ?`
@@ -121,10 +121,27 @@ func (a Agent) OpenFindings(attached bool, limit int) ([]Finding, error) {
 		//
 		// MAX rather than a join: one advisory id covers several packages and
 		// would otherwise multiply the result set.
+		// FixedIn is looked up from the bundle rather than stored on the finding.
+		// Whether a fix exists changes when the advisory is updated, not when the
+		// finding was detected — freezing it at detection time would keep saying
+		// "no fix" for something patched last week.
+		//
+		// The join goes through packages because a finding is keyed by purl and
+		// the advisory rows are keyed by ecosystem and package name.
 		query = `SELECT f.purl, f.advisory_id, f.score, f.tier, f.state, f.detected_at,
 			COALESCE(t.summary, ''),
-			(SELECT MAX(a.severity_cvss) FROM adv.advisories a WHERE a.id = f.advisory_id)
+			(SELECT MAX(a.severity_cvss) FROM adv.advisories a WHERE a.id = f.advisory_id),
+			COALESCE((
+				SELECT MIN(r.fixed) FROM adv.advisories a
+				JOIN adv.advisory_ranges r ON r.advisory_id = a.rowid
+				WHERE a.id = f.advisory_id
+				  AND a.ecosystem = p.ecosystem
+				  AND a.package_name = p.name
+				  AND a.kind <> 'malware'
+				  AND r.fixed IS NOT NULL
+			), '')
 			FROM findings f
+			LEFT JOIN packages p ON p.purl = f.purl
 			LEFT JOIN adv.advisory_text t ON t.id = f.advisory_id
 			WHERE f.state NOT IN ('ignored', 'fixed')
 			ORDER BY f.score DESC, f.purl LIMIT ?`
@@ -143,7 +160,8 @@ func (a Agent) OpenFindings(attached bool, limit int) ([]Finding, error) {
 		var summary sql.NullString
 		var baseCVSS sql.NullFloat64
 		if err := rows.Scan(&finding.PURL, &finding.AdvisoryID, &finding.Score,
-			&finding.Tier, &finding.State, &detectedAt, &summary, &baseCVSS); err != nil {
+			&finding.Tier, &finding.State, &detectedAt, &summary, &baseCVSS,
+			&finding.FixedIn); err != nil {
 			return nil, err
 		}
 		finding.DetectedAt = time.Unix(detectedAt, 0)

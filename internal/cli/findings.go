@@ -17,11 +17,18 @@ import (
 
 func findingsCmd() *cobra.Command {
 	var limit int
+	var fixableOnly bool
 
 	cmd := &cobra.Command{
 		Use:   "findings",
 		Short: "List advisories affecting installed packages",
-		Args:  cobra.NoArgs,
+		Long: "List advisories affecting installed packages, worst first.\n\n" +
+			"FIX is the version that resolves it, or \"none yet\" when the advisory has\n" +
+			"no published fix. --fixable narrows the list to what can actually be acted\n" +
+			"on today, which is not the same as what scores highest: a package can carry\n" +
+			"a dozen unpatched critical advisories while already being at the newest\n" +
+			"version its distribution ships.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load(configPath)
 			if err != nil {
@@ -37,12 +44,23 @@ func findingsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if fixableOnly {
+				kept := findings[:0]
+				for _, finding := range findings {
+					if finding.FixedIn != "" {
+						kept = append(kept, finding)
+					}
+				}
+				findings = kept
+			}
 			printFindings(cmd.OutOrStdout(), findings, st.BundleAttached)
 			return nil
 		},
 	}
 
 	cmd.Flags().IntVar(&limit, "limit", 50, "how many findings to show")
+	cmd.Flags().BoolVar(&fixableOnly, "fixable", false,
+		"only findings with a published fix — what can be acted on today")
 	return cmd
 }
 
@@ -58,8 +76,8 @@ func printFindings(out io.Writer, findings []repo.Finding, bundleAttached bool) 
 	}
 
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(table, "TIER\tSCORE\tCVSS\tPACKAGE\tADVISORY\tSTATE")
-	promoted := 0
+	fmt.Fprintln(table, "TIER\tSCORE\tCVSS\tFIX\tPACKAGE\tADVISORY")
+	promoted, fixable := 0, 0
 	for _, finding := range findings {
 		base := "—"
 		if finding.BaseCVSS != nil {
@@ -68,11 +86,27 @@ func printFindings(out io.Writer, findings []repo.Finding, bundleAttached bool) 
 				promoted++
 			}
 		}
+
+		// Whether anything can be done about it is the first question a person
+		// actually has, so it goes next to the severity rather than being
+		// something to look up one advisory at a time.
+		fix := "none yet"
+		if finding.FixedIn != "" {
+			fix = finding.FixedIn
+			fixable++
+		}
+
 		fmt.Fprintf(table, "%s\t%.1f\t%s\t%s\t%s\t%s\n",
-			strings.ToUpper(finding.Tier), finding.Score, base,
-			finding.PURL, finding.AdvisoryID, finding.State)
+			strings.ToUpper(finding.Tier), finding.Score, base, fix,
+			finding.PURL, finding.AdvisoryID)
 	}
 	table.Flush()
+
+	// A triage list whose top entry cannot be acted on teaches you to ignore the
+	// list. The highest-scoring finding on a real machine turned out to be
+	// nineteen unpatched snapd advisories on a package already at the latest
+	// version its distribution ships — correct, and useless to act on.
+	fmt.Fprintf(out, "\n%d of %d shown have a fix available.\n", fixable, len(findings))
 
 	// Two numbers that routinely disagree need saying out loud once, or the
 	// table reads as a bug. SCORE is the advisory's CVSS multiplied by where the
