@@ -1,6 +1,26 @@
-# Per-ecosystem bundles — deferred, with conditions
+# Per-ecosystem bundles — condition met, cleared to build
 
-**Status: not started. Deliberately blocked on M3.**
+**Status: detection audited and passing on both machines (2026-08-09). Cleared.**
+
+The condition was that detection had to be proven before any distribution
+machinery was built, because a wrongly-scoped bundle is a security problem where
+an oversized one is only a bandwidth problem. Measured against each package
+manager's own answer rather than against tests:
+
+| Machine | Check | Result |
+|---|---|---|
+| Windows laptop | `npm ls -g`, `pip list` | 0 false negatives |
+| Windows laptop | Debian 13 container | 0 false negatives, 87 = 87 |
+| Ubuntu server | host `dpkg -l` | 0 false negatives, **1830 = 1830** |
+| Ubuntu server | 19 running containers | 0 false negatives |
+
+Two results worth keeping. The one apparent failure — three packages the audit
+called missing — was the audit's own ground truth counting `rc` packages, which
+dpkg reports as known but which are removed with only config left behind. A
+package that is not on disk cannot be exploited. And pkgwatch consistently
+records *more* than the comparison can see, because it reads the package
+database out of a container as a file: two containers on the server have no
+shell tooling to ask, and their packages are visible anyway.
 
 The idea: an agent downloads advisories only for ecosystems it actually has.
 A Windows machine with no Python has no use for 25,860 PyPI records; a laptop
@@ -121,11 +141,58 @@ produce the same empty query result.
 - **The publisher pipeline** (M6) builds one artifact today and would build N,
   with N manifests and N signatures.
 
+## What the real fleet measured
+
+The home server's inventory, once the host collector existed:
+
+| Ecosystem | Packages |
+|---|---|
+| Ubuntu:24.04 | 1830 (the host itself) |
+| Debian:12 | 505 |
+| Debian:13 | 286 |
+| Alpine:v3.24 | 211 |
+| Alpine:v3.23 | 71 |
+| Alpine:v3.22 | 59 |
+
+**No npm. No PyPI. None at all.** It is a pure Docker host, and it is currently
+carrying npm's 53 MB — 45% of the file — to match zero packages.
+
+| Bundle for that machine | Size | Records |
+|---|---|---|
+| What it holds today | 117.0 MB | 522,525 |
+| Exactly the releases it runs | **30.6 MB** | 109,015 |
+
+74% smaller, and the laptop's profile is the mirror image: mostly npm and PyPI,
+no containers worth speaking of. One artifact is wrong for both.
+
+The decisive argument is not size, though. **1,830 packages on the most exposed
+machine in the fleet are unexamined right now** — including its openssl and its
+sshd — because the Ubuntu feed is 573 MB of input and cannot fit in a bundle
+every agent downloads whole. The current shape does not make Ubuntu coverage
+expensive; it makes it impossible.
+
+## Chosen design: split on publish, merge on the agent
+
+Bundles are built and signed per **ecosystem and release**. An agent downloads
+the ones its inventory says it needs, verifies each signature, and **imports
+them into one local advisories.db**.
+
+The alternative — attaching each bundle under its own schema and routing lookups
+by ecosystem — was rejected. It changes every query path in the project, and
+SQLite's default limit of ten attached databases is uncomfortably close to the
+six this server already needs. Merging keeps a single attachment, so the repo,
+watcher and gate are untouched: only distribution changes.
+
+The merged file is local and unsigned, which is correct. The trust boundary is
+at import, where each downloaded bundle is verified against the publisher key
+exactly as today. The merge is rebuilt from verified inputs into a temporary
+file and renamed, keeping the atomic-swap property that stops a half-written
+advisory database from silently disarming the gate.
+
 ## Recommendation
 
-Keep the fleet-wide bundle until M3's inventory is real and its detection has
-been measured on all three machines. Revisit then, with the numbers above and
-whatever the detection audit says.
-
-If detection turns out to be reliable, split at **ecosystem + release**, not
-ecosystem — that is where most of the saving is.
+Build it. Split at **ecosystem + release**, bind both into the signed message,
+and keep the safety properties above — particularly that an ecosystem absent
+from the merged file must read as *unknown* rather than clean, which the
+`covers` mechanism already does and which earned its keep on this server's first
+run.
