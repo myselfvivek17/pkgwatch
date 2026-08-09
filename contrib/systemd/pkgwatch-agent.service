@@ -1,5 +1,5 @@
 # User unit, not system: the agent inventories this user's packages and reads
-# this user's credentials paths. Install to ~/.config/systemd/user/ then:
+# this user's credential paths. Install to ~/.config/systemd/user/ then:
 #   systemctl --user enable --now pkgwatch-agent
 #   loginctl enable-linger $USER     # so it survives logout
 
@@ -8,15 +8,21 @@ Description=pkgwatch agent
 Documentation=https://github.com/myselfvivek17/pkgwatch
 After=network-online.target
 
+# The agent gates installs. If it cannot start, that must be loud rather than a
+# silent open door, so failures restart forever instead of tripping systemd's
+# start-rate limit and leaving the unit disabled.
+#
+# This belongs in [Unit], not [Service]. It was in the wrong section and systemd
+# ignored it with a warning nobody reads, which left the default in force: five
+# restarts in ten seconds and then it gives up permanently. Exactly the
+# behaviour the setting exists to prevent.
+StartLimitIntervalSec=0
+
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/pkgwatch agent
 Restart=on-failure
 RestartSec=5
-
-# The agent gates installs. If it cannot start, that must be loud, not a
-# silent open door — so failures restart rather than disabling the unit.
-StartLimitIntervalSec=0
 
 [Install]
 WantedBy=default.target
