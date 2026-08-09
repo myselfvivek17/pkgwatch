@@ -334,10 +334,13 @@ func (g *Gate) decide(req Request) (verdict Verdict) {
 	return Verdict{}
 }
 
+// covers matches the full ecosystem identifier, release included. A bundle
+// holding Debian:12 does not answer for Debian:13 — different fixed versions,
+// different feed — and treating it as if it did turns "found nothing" into
+// "nothing is wrong".
 func covers(covered []string, ecosystem string) bool {
-	base := match.BaseEcosystem(ecosystem)
 	for _, item := range covered {
-		if item == base {
+		if item == ecosystem {
 			return true
 		}
 	}

@@ -137,3 +137,33 @@ func TestPartialScanDoesNotRetireUntouchedPackages(t *testing.T) {
 		t.Errorf("present = %d, want 3 — a partial scan says nothing about what it did not look at", present)
 	}
 }
+
+// A bundle holding one distribution release does not answer for another.
+//
+// This is the finer-grained version of the PyPI gap, and it bit for real: a
+// bundle carrying only Ubuntu:24.04:LTS recorded its coverage as "Ubuntu", so a
+// machine running Ubuntu:24.04 was reported as examined, every lookup returned
+// no rows, and 1,830 packages read as clean.
+func TestCoverageIsMatchedPerRelease(t *testing.T) {
+	info := repo.BundleInfo{
+		Attached:   true,
+		Ecosystems: []string{"Alpine:v3.24", "Debian:12", "Ubuntu:24.04:LTS", "npm"},
+	}
+
+	for _, covered := range []string{"Debian:12", "Alpine:v3.24", "Ubuntu:24.04:LTS", "npm"} {
+		if !info.Covers(covered) {
+			t.Errorf("Covers(%q) = false, but the bundle carries it", covered)
+		}
+	}
+	for _, missing := range []string{"Debian:13", "Alpine:v3.22", "Ubuntu:24.04", "Ubuntu:22.04:LTS", "PyPI"} {
+		if info.Covers(missing) {
+			t.Errorf("Covers(%q) = true — the bundle has no records for it, and saying otherwise "+
+				"turns an empty lookup into a clean result", missing)
+		}
+	}
+
+	bases := info.CoveredBases()
+	if len(bases) != 4 {
+		t.Errorf("CoveredBases() = %v, want one entry per distinct ecosystem", bases)
+	}
+}

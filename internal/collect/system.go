@@ -38,13 +38,14 @@ func SystemDistro(known Known) Result {
 		return out
 	}
 	mtime := info.ModTime().Unix()
-	if known.unchanged(dbPath, mtime) {
-		// The package database is one file, so one mtime covers every package on
-		// the machine — nothing here can have changed without it changing.
-		out.Unchanged++
-		return out
-	}
 
+	// Deliberately not skipped on an unchanged mtime, unlike the npm and Python
+	// collectors. The whole machine's packages come from this one file, so the
+	// saving is a single read of about a megabyte — and the cost of caching it
+	// was real: when the Ubuntu ecosystem string gained its :LTS suffix, every
+	// host kept its old rows because the file had not been touched, and the fix
+	// silently did nothing. A cache keyed on a timestamp cannot notice that the
+	// code reading it changed.
 	raw, err := os.ReadFile(dbPath)
 	if err != nil {
 		slog.Warn("collect: cannot read the host package database", "path", dbPath, "error", err)

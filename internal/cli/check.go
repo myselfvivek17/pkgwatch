@@ -177,7 +177,7 @@ func runCheck(out io.Writer, cfg config.Config, pkg match.Package) error {
 		return fmt.Errorf("bundle %s carries no %s advisories at all "+
 			"(it covers %s) — this command cannot tell you anything about %s",
 			info.Version, match.BaseEcosystem(pkg.Ecosystem),
-			strings.Join(info.Ecosystems, ", "), pkg.Name)
+			strings.Join(info.CoveredBases(), ", "), pkg.Name)
 	}
 
 	advisories, err := repo.LookupAdvisories(handle, pkg.Ecosystem, pkg.Name)

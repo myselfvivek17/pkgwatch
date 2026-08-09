@@ -93,15 +93,19 @@ func ValidateVersion(version string) error {
 	return nil
 }
 
-// coveredEcosystems lists the base ecosystems present, sorted.
+// coveredEcosystems lists the ecosystems present, in full, sorted.
 //
-// Base, not the full identifier: a bundle carrying Debian:11 through Debian:14
-// covers Debian, and listing every release would make the meta row unbounded
-// without telling a caller anything it can act on.
+// Full identifiers, including the release. An earlier version recorded base
+// names only — a bundle carrying Debian:11 said it covered "Debian" — and that
+// is precisely wrong at the granularity that matters. A bundle holding only
+// Ubuntu:24.04:LTS would claim to cover Ubuntu, so a machine running
+// Ubuntu:25.10 would be reported as examined, every lookup would return no
+// rows, and 1,830 packages would read as clean. That happened on a real
+// machine, and the coverage check existed specifically to prevent it.
 func coveredEcosystems(advisories []match.Advisory) []string {
 	seen := map[string]struct{}{}
 	for _, adv := range advisories {
-		seen[match.BaseEcosystem(adv.Ecosystem)] = struct{}{}
+		seen[adv.Ecosystem] = struct{}{}
 	}
 	out := make([]string, 0, len(seen))
 	for ecosystem := range seen {

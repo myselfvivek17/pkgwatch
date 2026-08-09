@@ -9,6 +9,7 @@ package repo
 import (
 	"database/sql"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -82,14 +83,34 @@ type BundleInfo struct {
 }
 
 // Covers reports whether the bundle carries records for an ecosystem.
+//
+// Matched in full, release included. "Debian:12" and "Debian:13" are different
+// feeds with different fixed versions, and a bundle holding one does not answer
+// for the other — reporting that it does turns a lookup that finds nothing into
+// a clean bill of health.
 func (b BundleInfo) Covers(ecosystem string) bool {
-	base := match.BaseEcosystem(ecosystem)
 	for _, covered := range b.Ecosystems {
-		if covered == base {
+		if covered == ecosystem {
 			return true
 		}
 	}
 	return false
+}
+
+// CoveredBases collapses the coverage list to distinct ecosystem names, for
+// display. Six Debian and Alpine releases are a long line and a short fact.
+func (b BundleInfo) CoveredBases() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, covered := range b.Ecosystems {
+		base := match.BaseEcosystem(covered)
+		if !seen[base] {
+			seen[base] = true
+			out = append(out, base)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Bundle reads bundle_meta from the attached advisory database. Callers pass
