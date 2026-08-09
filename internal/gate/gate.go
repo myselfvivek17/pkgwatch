@@ -19,10 +19,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
-
-	"github.com/package-url/packageurl-go"
 
 	"github.com/myselfvivek17/pkgwatch/internal/match"
 	"github.com/myselfvivek17/pkgwatch/internal/repo"
@@ -195,7 +192,7 @@ func applyBuffer(verdicts []Verdict) {
 }
 
 func (g *Gate) record(req Request, verdict Verdict, started time.Time) {
-	purl := PURL(req.Ecosystem, req.Name, req.Version)
+	purl := match.PURL(req.Ecosystem, req.Name, req.Version)
 	decision := repo.DecisionAllowed
 	switch {
 	case verdict.Blocked && req.Point == PointResolve:
@@ -250,8 +247,8 @@ func (g *Gate) decide(req Request) (verdict Verdict) {
 	// shown what they were approving and named it; that is a local, deliberate
 	// loosening, which is the only direction loosening is allowed to travel.
 	if approved, err := g.Repo.IsApproved(req.SessionID,
-		PURL(req.Ecosystem, req.Name, req.Version),
-		PURLBase(req.Ecosystem, req.Name)); err == nil && approved {
+		match.PURL(req.Ecosystem, req.Name, req.Version),
+		match.PURLBase(req.Ecosystem, req.Name)); err == nil && approved {
 		return Verdict{Reason: repo.DecisionOverride}
 	}
 
@@ -358,7 +355,7 @@ func (g *Gate) blockTier() string {
 func (g *Gate) degrade(req Request, detail string) {
 	slog.Warn("gate degraded — allowing without evaluation",
 		"ecosystem", req.Ecosystem, "package", req.Name, "version", req.Version, "detail", detail)
-	g.event(repo.EventGateDegraded, "", PURL(req.Ecosystem, req.Name, req.Version), "", map[string]any{
+	g.event(repo.EventGateDegraded, "", match.PURL(req.Ecosystem, req.Name, req.Version), "", map[string]any{
 		"detail":     detail,
 		"session_id": req.SessionID,
 	})
@@ -413,31 +410,4 @@ func roundDuration(d time.Duration) time.Duration {
 		return d.Round(time.Minute)
 	}
 	return d.Round(time.Hour)
-}
-
-// PURLBase is the package identifier with no version — what an override that
-// covers a whole package for one install is recorded against.
-func PURLBase(ecosystem, name string) string { return PURL(ecosystem, name, "") }
-
-// PURL renders a package as the identifier findings and decisions are keyed by.
-func PURL(ecosystem, name, version string) string {
-	instance := packageurl.PackageURL{Version: version}
-	switch match.BaseEcosystem(ecosystem) {
-	case match.EcosystemNPM:
-		instance.Type = packageurl.TypeNPM
-		// npm scopes are the purl namespace: @ctrl/tinycolor is namespace "@ctrl".
-		if scope, bare, found := strings.Cut(strings.TrimPrefix(name, "@"), "/"); found {
-			instance.Namespace = "@" + scope
-			instance.Name = bare
-		} else {
-			instance.Name = name
-		}
-	case match.EcosystemPyPI:
-		instance.Type = packageurl.TypePyPi
-		instance.Name = match.NormalizeName(ecosystem, name)
-	default:
-		instance.Type = strings.ToLower(match.BaseEcosystem(ecosystem))
-		instance.Name = name
-	}
-	return instance.ToString()
 }

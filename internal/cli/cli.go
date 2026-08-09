@@ -70,7 +70,7 @@ func Root() *cobra.Command {
 		pipCmd(),
 		shellInitCmd(),
 
-		stub("scan", "Scan installed packages into the inventory", "M3", cobra.NoArgs),
+		scanCmd(),
 		syncCmd(),
 		checkCmd(),
 		publishCmd(),

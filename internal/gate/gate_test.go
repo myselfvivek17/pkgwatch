@@ -408,7 +408,7 @@ func TestPURL(t *testing.T) {
 		{match.EcosystemPyPI, "Zope.Interface", "5.4.0", "pkg:pypi/zope-interface@5.4.0"},
 	}
 	for _, tc := range cases {
-		if got := gate.PURL(tc.ecosystem, tc.name, tc.version); got != tc.want {
+		if got := match.PURL(tc.ecosystem, tc.name, tc.version); got != tc.want {
 			t.Errorf("PURL(%q, %q) = %q, want %q", tc.ecosystem, tc.name, got, tc.want)
 		}
 	}

@@ -277,7 +277,7 @@ func (n *NPM) filterPackument(name string, body []byte) ([]byte, error) {
 			ids = append(ids, id)
 		}
 		sort.Strings(ids)
-		n.Gate.event(repo.EventPackageFiltered, "", PURLBase(match.EcosystemNPM, name), "",
+		n.Gate.event(repo.EventPackageFiltered, "", match.PURLBase(match.EcosystemNPM, name), "",
 			map[string]any{
 				"withheld":   len(removed),
 				"offered":    len(versions),
@@ -559,7 +559,7 @@ func writeBlocked(w http.ResponseWriter, ecosystem, name, version string, v Verd
 		"fixed_in":  v.FixedIn,
 		"resolve":   "run the install through `pkgwatch npm` / `pkgwatch pip` to review and override",
 		"pkgwatch":  true,
-		"purl":      PURL(ecosystem, name, version),
+		"purl":      match.PURL(ecosystem, name, version),
 		"malicious": v.Reason == ReasonMalware,
 	}
 	w.Header().Set("Content-Type", "application/json")
