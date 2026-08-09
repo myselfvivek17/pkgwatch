@@ -69,7 +69,7 @@ CREATE TABLE bundle_meta (k TEXT PRIMARY KEY, v TEXT);
 // without this check a newer builder's output would simply return no rows,
 // which reads as "no advisories" rather than as an error. Bump it whenever
 // schemaSQL changes shape.
-const SchemaVersion = "5"
+const SchemaVersion = "6"
 
 // versionFormat constrains bundle versions to fixed-width, lexicographically
 // sortable strings: YYYYMMDD, optionally with an hourly delta suffix
@@ -120,9 +120,12 @@ func advisoryKey(adv match.Advisory) string {
 
 // Build writes a complete advisory database at path and returns its manifest,
 // unsigned. The caller signs the file's bytes.
-func Build(path, version string, advisories []match.Advisory, builtAt time.Time) (Manifest, error) {
+func Build(path, version, scope string, advisories []match.Advisory, builtAt time.Time) (Manifest, error) {
 	if err := ValidateVersion(version); err != nil {
 		return Manifest{}, err
+	}
+	if scope == "" {
+		return Manifest{}, fmt.Errorf("bundle: a bundle must declare what it covers")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return Manifest{}, fmt.Errorf("bundle: create output dir: %w", err)
@@ -154,6 +157,9 @@ func Build(path, version string, advisories []match.Advisory, builtAt time.Time)
 		"built_at":     builtAt.UTC().Format(time.RFC3339),
 		"record_count": fmt.Sprint(written),
 		"schema":       SchemaVersion,
+		// What this bundle claims to cover, kept alongside the ecosystems it
+		// actually contains so a mismatch between the two is detectable.
+		"scope": scope,
 		// What this bundle actually covers, so an ecosystem that is simply
 		// absent can be reported as unknown rather than as clean. A bundle built
 		// without the PyPI feed answers "no advisories" for every Python package
@@ -182,6 +188,7 @@ func Build(path, version string, advisories []match.Advisory, builtAt time.Time)
 
 	return Manifest{
 		Version:     version,
+		Scope:       scope,
 		SHA256:      Digest(data),
 		Size:        int64(len(data)),
 		BuiltAt:     builtAt.UTC(),

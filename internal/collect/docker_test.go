@@ -73,9 +73,19 @@ func TestEcosystemFromOSRelease(t *testing.T) {
 			ecosystem: "Debian:13", path: "/var/lib/dpkg/status",
 		},
 		{
-			name:      "ubuntu",
-			raw:       "ID=ubuntu\nVERSION_ID=\"22.04\"\n",
-			ecosystem: "Ubuntu:22.04", path: "/var/lib/dpkg/status",
+			// OSV files long-term releases with an :LTS suffix. Producing
+			// "Ubuntu:24.04" instead is not a near miss — the lookup returns zero
+			// rows, and on a host that is 1,800 packages reading as nothing on
+			// file, which is indistinguishable from a clean machine.
+			name: "ubuntu LTS",
+			raw: "ID=ubuntu\nVERSION_ID=\"24.04\"\n" +
+				"VERSION=\"24.04.3 LTS (Noble Numbat)\"\nPRETTY_NAME=\"Ubuntu 24.04.3 LTS\"\n",
+			ecosystem: "Ubuntu:24.04:LTS", path: "/var/lib/dpkg/status",
+		},
+		{
+			name:      "ubuntu interim release carries no suffix",
+			raw:       "ID=ubuntu\nVERSION_ID=\"25.10\"\nVERSION=\"25.10 (Questing Quokka)\"\n",
+			ecosystem: "Ubuntu:25.10", path: "/var/lib/dpkg/status",
 		},
 		{
 			// OSV files Alpine advisories per minor release, not per patch.

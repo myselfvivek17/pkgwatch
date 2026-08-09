@@ -420,6 +420,17 @@ func ecosystemFromOSRelease(raw []byte) (ecosystem, dbPath string) {
 	case "debian":
 		return "Debian:" + version, "/var/lib/dpkg/status"
 	case "ubuntu":
+		// OSV files long-term releases as "Ubuntu:24.04:LTS" and interim ones as
+		// "Ubuntu:25.10". Getting this wrong is not a near miss — the lookup
+		// returns zero rows, which for the 1,830 packages on an Ubuntu host means
+		// every one of them reads as having nothing on file.
+		//
+		// Taken from os-release rather than from a hardcoded list of LTS
+		// versions, which would need editing every two years and would be wrong
+		// in between.
+		if isLTS(fields) {
+			return "Ubuntu:" + version + ":LTS", "/var/lib/dpkg/status"
+		}
 		return "Ubuntu:" + version, "/var/lib/dpkg/status"
 	case "alpine":
 		// OSV files Alpine advisories per minor release — "v3.19", not the
@@ -431,6 +442,13 @@ func ecosystemFromOSRelease(raw []byte) (ecosystem, dbPath string) {
 		return "", ""
 	}
 	return "", ""
+}
+
+// isLTS reads the long-term-support marker out of os-release. Ubuntu puts it in
+// VERSION ("24.04.3 LTS (Noble Numbat)") and PRETTY_NAME; either will do.
+func isLTS(fields map[string]string) bool {
+	return strings.Contains(strings.ToUpper(fields["VERSION"]), "LTS") ||
+		strings.Contains(strings.ToUpper(fields["PRETTY_NAME"]), "LTS")
 }
 
 // parseDpkgStatus reads Debian's package database.

@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -78,6 +79,7 @@ func keygenCmd() *cobra.Command {
 
 func buildBundleCmd() *cobra.Command {
 	var input, out, keyPath, version string
+	var split bool
 
 	cmd := &cobra.Command{
 		Use:   "build-bundle",
@@ -106,32 +108,10 @@ func buildBundleCmd() *cobra.Command {
 				"parsed %d advisories (%d records skipped: unsupported ecosystem or unreadable)\n",
 				len(advisories), skipped)
 
-			manifest, err := bundle.Build(out, version, advisories, time.Now())
-			if err != nil {
-				return err
+			if split {
+				return buildSplit(cmd, out, version, keyPath, advisories)
 			}
-
-			if keyPath != "" {
-				if err := signBundle(out, keyPath, &manifest); err != nil {
-					return err
-				}
-			} else {
-				fmt.Fprintln(cmd.OutOrStdout(),
-					"warning: no --key given, bundle is unsigned and every agent will reject it")
-			}
-
-			manifestPath := out + ".json"
-			encoded, err := json.MarshalIndent(manifest, "", "  ")
-			if err != nil {
-				return err
-			}
-			if err := os.WriteFile(manifestPath, append(encoded, '\n'), 0o644); err != nil {
-				return err
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "wrote %s (%.1f MB, %d records)\nwrote %s\n",
-				out, float64(manifest.Size)/(1024*1024), manifest.RecordCount, manifestPath)
-			return nil
+			return buildOne(cmd, out, version, bundle.ScopeAll, keyPath, advisories)
 		},
 	}
 
@@ -139,7 +119,81 @@ func buildBundleCmd() *cobra.Command {
 	cmd.Flags().StringVar(&out, "out", "", "path to write advisories.db to (required)")
 	cmd.Flags().StringVar(&keyPath, "key", "", "base64 ed25519 private key to sign with")
 	cmd.Flags().StringVar(&version, "version", "", "bundle version (default: today, YYYYMMDD)")
+	cmd.Flags().BoolVar(&split, "split", false,
+		"emit one signed bundle per ecosystem and release into --out as a directory")
 	return cmd
+}
+
+// buildOne writes and signs a single bundle covering scope.
+func buildOne(cmd *cobra.Command, out, version, scope, keyPath string, advisories []match.Advisory) error {
+	manifest, err := bundle.Build(out, version, scope, advisories, time.Now())
+	if err != nil {
+		return err
+	}
+
+	if keyPath != "" {
+		if err := signBundle(out, keyPath, &manifest); err != nil {
+			return err
+		}
+	} else {
+		fmt.Fprintln(cmd.OutOrStdout(),
+			"warning: no --key given, bundle is unsigned and every agent will reject it")
+	}
+
+	encoded, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(out+".json", append(encoded, '\n'), 0o644); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "%-24s %7.1f MB  %8d records  %s\n",
+		manifest.Scope, float64(manifest.Size)/(1024*1024), manifest.RecordCount, out)
+	return nil
+}
+
+// buildSplit emits one bundle per ecosystem *and release*.
+//
+// Release, not just ecosystem, because that is where the saving is: Debian
+// ships thirteen releases in the corpus at roughly a quarter of its records
+// apiece and a machine can only ever match one of them. It is also the only way
+// Ubuntu fits at all — its feed alone is larger than every other ecosystem
+// combined, and a fleet-wide bundle simply cannot carry it.
+func buildSplit(cmd *cobra.Command, outDir, version, keyPath string, advisories []match.Advisory) error {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return fmt.Errorf("create output directory: %w", err)
+	}
+
+	byScope := map[string][]match.Advisory{}
+	for _, adv := range advisories {
+		byScope[adv.Ecosystem] = append(byScope[adv.Ecosystem], adv)
+	}
+
+	scopes := make([]string, 0, len(byScope))
+	for scope := range byScope {
+		scopes = append(scopes, scope)
+	}
+	sort.Strings(scopes)
+
+	fmt.Fprintf(cmd.OutOrStdout(), "building %d bundles\n\n", len(scopes))
+	fmt.Fprintf(cmd.OutOrStdout(), "%-24s %10s  %16s  %s\n", "SCOPE", "SIZE", "RECORDS", "FILE")
+
+	var totalBytes int64
+	for _, scope := range scopes {
+		out := filepath.Join(outDir, "advisories-"+bundle.ScopeFileName(scope)+".db")
+		if err := buildOne(cmd, out, version, scope, keyPath, byScope[scope]); err != nil {
+			return fmt.Errorf("scope %s: %w", scope, err)
+		}
+		if info, err := os.Stat(out); err == nil {
+			totalBytes += info.Size()
+		}
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(),
+		"\n%d bundles, %.1f MB total. An agent downloads only the scopes its inventory names.\n",
+		len(scopes), float64(totalBytes)/(1024*1024))
+	return nil
 }
 
 func signBundle(bundlePath, keyPath string, manifest *bundle.Manifest) error {
@@ -160,7 +214,7 @@ func signBundle(bundlePath, keyPath string, manifest *bundle.Manifest) error {
 		return err
 	}
 
-	sig := bundle.Sign(ed25519.PrivateKey(raw), manifest.Version, data)
+	sig := bundle.Sign(ed25519.PrivateKey(raw), manifest.Version, manifest.Scope, data)
 	manifest.Signature = hex.EncodeToString(sig)
 
 	return os.WriteFile(bundlePath+".sig", []byte(manifest.Signature+"\n"), 0o644)

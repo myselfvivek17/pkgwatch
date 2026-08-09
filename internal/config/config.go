@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/myselfvivek17/pkgwatch/internal/bundle"
 )
 
 // Default ports. The hub dashboard and an agent's local dashboard both want
@@ -183,3 +186,34 @@ func (c Config) AgentDBPath() string    { return filepath.Join(c.DataDir, "agent
 func (c Config) HubDBPath() string      { return filepath.Join(c.DataDir, "hub.db") }
 func (c Config) AdvisoryDBPath() string { return filepath.Join(c.DataDir, "advisories.db") }
 func (c Config) QuarantineDir() string  { return filepath.Join(c.DataDir, "quarantine") }
+
+// BundleDir holds the verified per-scope bundles the merged advisories.db is
+// built from. They are kept rather than discarded: they are what was actually
+// signed, and without them changing one ecosystem would mean re-downloading
+// every other.
+func (c Config) BundleDir() string { return filepath.Join(c.DataDir, "bundles") }
+
+// ScopedBundlePath is where the bundle for one scope is stored. The filename is
+// a convenience; the scope that counts is the one inside the signature.
+func (c Config) ScopedBundlePath(scope string) string {
+	return filepath.Join(c.BundleDir(), "advisories-"+bundle.ScopeFileName(scope)+".db")
+}
+
+// ScopedBundles lists every verified source bundle held locally.
+func (c Config) ScopedBundles() ([]string, error) {
+	entries, err := os.ReadDir(c.BundleDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var out []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".db") {
+			out = append(out, filepath.Join(c.BundleDir(), entry.Name()))
+		}
+	}
+	return out, nil
+}

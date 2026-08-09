@@ -16,18 +16,30 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
 // signaturePrefix domain-separates our signatures, and binding the version into
 // the signed message means an old, validly signed bundle cannot be replayed as
 // the current one to freeze an agent's view of the world.
-const signaturePrefix = "pkgwatch-bundle-v1"
+// signaturePrefix is v2 because the signed message gained the scope. A v1
+// signature does not verify under v2 and must not: the whole point of the
+// change is that a bundle's identity now includes what it claims to cover.
+const signaturePrefix = "pkgwatch-bundle-v2"
+
+// ScopeAll is the scope of a bundle carrying every ecosystem.
+const ScopeAll = "all"
 
 // Manifest describes a published bundle. Signature covers SignedMessage, not
 // this struct, so the manifest can gain fields without invalidating signatures.
 type Manifest struct {
-	Version     string    `json:"version"`
+	Version string `json:"version"`
+
+	// Scope is what this bundle claims to cover: "npm", "Debian:12", or "all".
+	// It is signed, because it is a security-relevant claim — see SignedMessage.
+	Scope string `json:"scope"`
+
 	SHA256      string    `json:"sha256"`
 	Size        int64     `json:"size"`
 	BuiltAt     time.Time `json:"built_at"`
@@ -37,15 +49,24 @@ type Manifest struct {
 }
 
 // SignedMessage is the exact byte string a bundle signature covers: the
-// protocol tag, the version, and the digest of the file.
-func SignedMessage(version string, data []byte) []byte {
+// protocol tag, the version, the scope, and the digest of the file.
+//
+// The scope is in here rather than only in the manifest because of what a
+// per-ecosystem layout makes possible. Without it, a validly signed npm bundle
+// could be served as the Debian one: every check passes — the key is trusted,
+// the digest matches, the version is current — and the agent silently ends up
+// with zero Debian advisories. It would then report every Debian package as
+// having nothing on file, which is indistinguishable from safety. Binding the
+// scope is what makes "this is the Debian bundle" a claim the publisher made
+// rather than a claim the filename makes.
+func SignedMessage(version, scope string, data []byte) []byte {
 	sum := sha256.Sum256(data)
-	return []byte(signaturePrefix + "\n" + version + "\n" + hex.EncodeToString(sum[:]))
+	return []byte(signaturePrefix + "\n" + version + "\n" + scope + "\n" + hex.EncodeToString(sum[:]))
 }
 
 // Sign produces a bundle signature. Used by the publisher; agents only verify.
-func Sign(priv ed25519.PrivateKey, version string, data []byte) []byte {
-	return ed25519.Sign(priv, SignedMessage(version, data))
+func Sign(priv ed25519.PrivateKey, version, scope string, data []byte) []byte {
+	return ed25519.Sign(priv, SignedMessage(version, scope, data))
 }
 
 // Verifier holds the publisher keys a binary trusts.
@@ -59,7 +80,7 @@ type Verifier struct {
 var ErrNoKeys = errors.New("bundle: no publisher keys compiled into this binary")
 
 // Verify checks a bundle's signature against every trusted key.
-func (v Verifier) Verify(version string, data, sig []byte) error {
+func (v Verifier) Verify(version, scope string, data, sig []byte) error {
 	if len(v.Keys) == 0 {
 		return ErrNoKeys
 	}
@@ -67,13 +88,28 @@ func (v Verifier) Verify(version string, data, sig []byte) error {
 		return fmt.Errorf("bundle: signature is %d bytes, want %d", len(sig), ed25519.SignatureSize)
 	}
 
-	msg := SignedMessage(version, data)
+	msg := SignedMessage(version, scope, data)
 	for _, key := range v.Keys {
 		if len(key) == ed25519.PublicKeySize && ed25519.Verify(key, msg, sig) {
 			return nil
 		}
 	}
-	return fmt.Errorf("bundle: signature for version %q does not verify against any trusted publisher key", version)
+	return fmt.Errorf(
+		"bundle: signature for version %q scope %q does not verify against any trusted publisher key",
+		version, scope)
+}
+
+// ScopeFileName renders a scope as a filename component: "Debian:12" becomes
+// "debian-12", "crates.io" stays "crates.io".
+//
+// The filename is a convenience only. Nothing trusts it — the scope that counts
+// is the one inside the signature.
+func ScopeFileName(scope string) string {
+	safe := strings.ToLower(scope)
+	for _, bad := range []string{":", "/", `\`, " "} {
+		safe = strings.ReplaceAll(safe, bad, "-")
+	}
+	return safe
 }
 
 // Digest returns the hex SHA-256 of data, as published in the manifest.

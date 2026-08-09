@@ -34,7 +34,7 @@ func buildTestBundle(t *testing.T) *sql.DB {
 
 	dir := t.TempDir()
 	bundlePath := filepath.Join(dir, "advisories.db")
-	manifest, err := bundle.Build(bundlePath, "20260808", advisories, time.Now())
+	manifest, err := bundle.Build(bundlePath, "20260808", bundle.ScopeAll, advisories, time.Now())
 	if err != nil {
 		t.Fatalf("build bundle: %v", err)
 	}

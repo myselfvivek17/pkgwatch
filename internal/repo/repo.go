@@ -69,6 +69,7 @@ func (a Agent) HubState(key string) (string, error) {
 type BundleInfo struct {
 	Attached    bool
 	Version     string
+	Scope       string
 	Schema      string
 	BuiltAt     time.Time
 	RecordCount int
@@ -125,6 +126,8 @@ func Bundle(handle *sql.DB, attached bool) (BundleInfo, error) {
 			if n, err := strconv.Atoi(v); err == nil {
 				info.RecordCount = n
 			}
+		case "scope":
+			info.Scope = v
 		case "ecosystems":
 			if v != "" {
 				info.Ecosystems = strings.Split(v, ",")

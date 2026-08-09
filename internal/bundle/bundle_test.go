@@ -22,10 +22,10 @@ func TestVerifyAcceptsAGoodSignature(t *testing.T) {
 	pub, priv := mustKeypair(t)
 	data := []byte("advisory bundle bytes")
 
-	sig := Sign(priv, "20260808", data)
+	sig := Sign(priv, "20260808", ScopeAll, data)
 
 	v := Verifier{Keys: []ed25519.PublicKey{pub}}
-	if err := v.Verify("20260808", data, sig); err != nil {
+	if err := v.Verify("20260808", ScopeAll, data, sig); err != nil {
 		t.Errorf("Verify rejected a valid signature: %v", err)
 	}
 }
@@ -37,10 +37,10 @@ func TestVerifyAcceptsTheNextKey(t *testing.T) {
 	next, nextPriv := mustKeypair(t)
 	data := []byte("bundle signed with the incoming key")
 
-	sig := Sign(nextPriv, "20260901", data)
+	sig := Sign(nextPriv, "20260901", ScopeAll, data)
 
 	v := Verifier{Keys: []ed25519.PublicKey{current, next}}
-	if err := v.Verify("20260901", data, sig); err != nil {
+	if err := v.Verify("20260901", ScopeAll, data, sig); err != nil {
 		t.Errorf("Verify rejected a signature from the next key: %v", err)
 	}
 }
@@ -50,10 +50,10 @@ func TestVerifyRejectsAForeignKey(t *testing.T) {
 	_, attackerPriv := mustKeypair(t)
 	data := []byte("bundle")
 
-	sig := Sign(attackerPriv, "20260808", data)
+	sig := Sign(attackerPriv, "20260808", ScopeAll, data)
 
 	v := Verifier{Keys: []ed25519.PublicKey{pub}}
-	if err := v.Verify("20260808", data, sig); err == nil {
+	if err := v.Verify("20260808", ScopeAll, data, sig); err == nil {
 		t.Error("Verify accepted a signature from a key we do not trust")
 	}
 }
@@ -63,13 +63,13 @@ func TestVerifyRejectsAForeignKey(t *testing.T) {
 func TestVerifyRejectsTamperedBytes(t *testing.T) {
 	pub, priv := mustKeypair(t)
 	data := []byte("advisory bundle bytes")
-	sig := Sign(priv, "20260808", data)
+	sig := Sign(priv, "20260808", ScopeAll, data)
 
 	tampered := append([]byte(nil), data...)
 	tampered[0] ^= 0x01
 
 	v := Verifier{Keys: []ed25519.PublicKey{pub}}
-	if err := v.Verify("20260808", tampered, sig); err == nil {
+	if err := v.Verify("20260808", ScopeAll, tampered, sig); err == nil {
 		t.Error("Verify accepted a bundle whose bytes had been changed")
 	}
 }
@@ -79,10 +79,10 @@ func TestVerifyRejectsTamperedBytes(t *testing.T) {
 func TestVerifyRejectsAReplayedVersion(t *testing.T) {
 	pub, priv := mustKeypair(t)
 	data := []byte("last month's bundle")
-	sig := Sign(priv, "20260701", data)
+	sig := Sign(priv, "20260701", ScopeAll, data)
 
 	v := Verifier{Keys: []ed25519.PublicKey{pub}}
-	if err := v.Verify("20260901", data, sig); err == nil {
+	if err := v.Verify("20260901", ScopeAll, data, sig); err == nil {
 		t.Error("Verify accepted a bundle replayed under a different version")
 	}
 }
@@ -90,10 +90,10 @@ func TestVerifyRejectsAReplayedVersion(t *testing.T) {
 func TestVerifyWithNoKeysConfiguredFails(t *testing.T) {
 	_, priv := mustKeypair(t)
 	data := []byte("bundle")
-	sig := Sign(priv, "20260808", data)
+	sig := Sign(priv, "20260808", ScopeAll, data)
 
 	v := Verifier{}
-	err := v.Verify("20260808", data, sig)
+	err := v.Verify("20260808", ScopeAll, data, sig)
 	if err == nil {
 		t.Fatal("Verify succeeded with no trusted keys")
 	}
@@ -107,7 +107,7 @@ func TestVerifyRejectsAMalformedSignature(t *testing.T) {
 	v := Verifier{Keys: []ed25519.PublicKey{pub}}
 
 	for _, sig := range [][]byte{nil, {}, []byte("short")} {
-		if err := v.Verify("20260808", []byte("bundle"), sig); err == nil {
+		if err := v.Verify("20260808", ScopeAll, []byte("bundle"), sig); err == nil {
 			t.Errorf("Verify accepted a %d-byte signature", len(sig))
 		}
 	}
@@ -200,6 +200,45 @@ func TestBuiltInVerifierIsWiredUp(t *testing.T) {
 	for i, k := range v.Keys {
 		if len(k) != ed25519.PublicKeySize {
 			t.Errorf("embedded key %d is %d bytes, want %d", i, len(k), ed25519.PublicKeySize)
+		}
+	}
+}
+
+// The reason the scope is inside the signature rather than only in the manifest.
+//
+// With per-ecosystem bundles, a validly signed npm bundle served as the Debian
+// one would otherwise pass every check: trusted key, matching digest, current
+// version. The agent would end up with zero Debian advisories and report every
+// Debian package as having nothing on file, which is indistinguishable from
+// safety.
+func TestSignatureDoesNotTransferBetweenScopes(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := Verifier{Keys: []ed25519.PublicKey{pub}}
+	data := []byte("the npm bundle")
+
+	sig := Sign(priv, "20260808", "npm", data)
+	if err := v.Verify("20260808", "npm", data, sig); err != nil {
+		t.Fatalf("the bundle should verify as what it is: %v", err)
+	}
+	if err := v.Verify("20260808", "Debian:12", data, sig); err == nil {
+		t.Fatal("the npm bundle verified as the Debian one — a served-as attack would blind the agent")
+	}
+}
+
+func TestScopeFileName(t *testing.T) {
+	cases := map[string]string{
+		"npm":          "npm",
+		"Debian:12":    "debian-12",
+		"Alpine:v3.24": "alpine-v3.24",
+		"crates.io":    "crates.io",
+		"all":          "all",
+	}
+	for scope, want := range cases {
+		if got := ScopeFileName(scope); got != want {
+			t.Errorf("ScopeFileName(%q) = %q, want %q", scope, got, want)
 		}
 	}
 }

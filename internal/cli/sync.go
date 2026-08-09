@@ -97,24 +97,28 @@ func installBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPa
 			got, manifest.SHA256)
 	}
 
-	if err := bundle.Default().Verify(manifest.Version, data, sig); err != nil {
+	if manifest.Scope == "" {
+		return fmt.Errorf("REFUSING to install: manifest declares no scope — " +
+			"a bundle that does not say what it covers cannot be placed")
+	}
+	if err := bundle.Default().Verify(manifest.Version, manifest.Scope, data, sig); err != nil {
 		return fmt.Errorf("REFUSING to install: %w", err)
 	}
 
-	// Anti-rollback. Signature binding stops a bundle being relabelled; it
-	// cannot stop someone replaying a genuinely old, genuinely signed bundle to
-	// freeze this machine's view of the world. Only the agent knows what it
-	// already has, so the check belongs here.
-	current, err := currentBundleVersion(cfg)
-	if err != nil {
-		return err
-	}
+	// Anti-rollback, per scope. Signature binding stops a bundle being
+	// relabelled; it cannot stop someone replaying a genuinely old, genuinely
+	// signed bundle to freeze this machine's view of the world. Only the agent
+	// knows what it already has, so the check belongs here — and it is per scope
+	// because the npm bundle being newer says nothing about the Debian one.
+	scopePath := cfg.ScopedBundlePath(manifest.Scope)
+	current := scopedBundleVersion(scopePath)
 	if current != "" && manifest.Version < current && !allowDowngrade {
-		return fmt.Errorf("REFUSING to install: bundle %s is older than the installed %s "+
-			"(pass --allow-downgrade if this is deliberate)", manifest.Version, current)
+		return fmt.Errorf("REFUSING to install: %s bundle %s is older than the installed %s "+
+			"(pass --allow-downgrade if this is deliberate)",
+			manifest.Scope, manifest.Version, current)
 	}
 
-	// Release the attached bundle before replacing the file. On Windows an open
+	// Release the merged database before rebuilding it. On Windows an open
 	// handle blocks the rename outright.
 	handle, err := db.Open(cfg.AgentDBPath(), db.SchemaAgent)
 	if err != nil {
@@ -128,24 +132,50 @@ func installBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPa
 	}
 	handle.Close()
 
-	if err := bundle.Install(cfg.AdvisoryDBPath(), data); err != nil {
+	// The verified source is kept. The merged database is derived and can be
+	// rebuilt at any time; the sources are what was actually signed, and
+	// throwing them away would mean re-downloading every other scope to change
+	// one of them.
+	if err := bundle.Install(scopePath, data); err != nil {
 		return err
 	}
 
-	// Only now that the bytes are trusted, read what they say about themselves
-	// and check it agrees with the manifest we verified.
-	installed, err := readBundleMeta(cfg.AdvisoryDBPath(), true)
+	sources, err := cfg.ScopedBundles()
 	if err != nil {
-		return fmt.Errorf("installed bundle is unreadable: %w", err)
+		return err
 	}
-	if installed.Version != manifest.Version {
-		return fmt.Errorf("installed bundle declares version %q but was signed as %q — "+
-			"the publisher built it wrong", installed.Version, manifest.Version)
+	merged, err := bundle.Merge(sources, cfg.AdvisoryDBPath(), time.Now())
+	if err != nil {
+		return fmt.Errorf("rebuild the merged advisory database: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "installed bundle %s · %d records · %s\n",
-		installed.Version, installed.RecordCount, cfg.AdvisoryDBPath())
+	// Only now that the bytes are trusted, read what the merged file says about
+	// itself and check it is usable.
+	installed, err := readBundleMeta(cfg.AdvisoryDBPath(), true)
+	if err != nil {
+		return fmt.Errorf("merged advisory database is unreadable: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "installed %s bundle %s\n", manifest.Scope, manifest.Version)
+	fmt.Fprintf(cmd.OutOrStdout(), "advisories now %d records from %d scope(s) · covers %s\n",
+		merged.RecordCount, len(sources), strings.Join(installed.Ecosystems, ", "))
 	return nil
+}
+
+// scopedBundleVersion reports the version of the source bundle already held for
+// a scope, or "" if there is none.
+//
+// Deliberately tolerant: a source that will not open should not block replacing
+// it, which is exactly what a sync is for.
+func scopedBundleVersion(path string) string {
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	info, err := readBundleMeta(path, false)
+	if err != nil {
+		return ""
+	}
+	return info.Version
 }
 
 func readManifest(path string) (bundle.Manifest, error) {
@@ -185,25 +215,6 @@ func readSignature(manifest bundle.Manifest, sigPath string) ([]byte, error) {
 		return nil, fmt.Errorf("signature is not hex: %w", err)
 	}
 	return sig, nil
-}
-
-// currentBundleVersion reports the version already installed, or "" if none.
-//
-// Deliberately does not validate the schema. bundle_meta exists in every
-// layout, so an older-format bundle still yields a usable version — and folding
-// a schema mismatch into "unreadable" would silently switch the rollback guard
-// off exactly when a bundle is being replaced.
-func currentBundleVersion(cfg config.Config) (string, error) {
-	if _, err := os.Stat(cfg.AdvisoryDBPath()); err != nil {
-		return "", nil // nothing installed yet
-	}
-	info, err := readBundleMeta(cfg.AdvisoryDBPath(), false)
-	if err != nil {
-		// A genuinely unreadable bundle should not block replacing it — that is
-		// exactly the situation a sync exists to repair.
-		return "", nil
-	}
-	return info.Version, nil
 }
 
 // readBundleMeta opens an already-trusted bundle to read what it declares.

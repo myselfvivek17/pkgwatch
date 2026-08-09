@@ -56,7 +56,7 @@ func newGateWith(t *testing.T, withBundle bool, extra ...match.Advisory) *gate.G
 		advisories = append(advisories, extra...)
 
 		bundlePath := filepath.Join(dir, "advisories.db")
-		if _, err := bundle.Build(bundlePath, "20260808", advisories, time.Now()); err != nil {
+		if _, err := bundle.Build(bundlePath, "20260808", bundle.ScopeAll, advisories, time.Now()); err != nil {
 			t.Fatalf("build bundle: %v", err)
 		}
 		if attached, err = db.AttachAdvisories(handle, bundlePath); err != nil || !attached {

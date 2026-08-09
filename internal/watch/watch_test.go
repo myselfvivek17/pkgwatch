@@ -35,7 +35,7 @@ func newWatched(t *testing.T) (*sql.DB, repo.Agent, repo.BundleInfo) {
 
 	dir := t.TempDir()
 	bundlePath := filepath.Join(dir, "advisories.db")
-	if _, err := bundle.Build(bundlePath, "20260808", advisories, time.Now()); err != nil {
+	if _, err := bundle.Build(bundlePath, "20260808", bundle.ScopeAll, advisories, time.Now()); err != nil {
 		t.Fatalf("build bundle: %v", err)
 	}
 
