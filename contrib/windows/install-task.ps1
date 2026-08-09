@@ -7,8 +7,13 @@
 #
 #   powershell -ExecutionPolicy Bypass -File contrib\windows\install-task.ps1
 #
+# ASCII only, deliberately. Windows PowerShell 5.1 reads a .ps1 with no byte
+# order mark using the system ANSI code page, so a stray em dash in a comment
+# becomes mojibake and the file fails to parse. An install script that breaks on
+# the shell most people have is not much of an install script.
+#
 # Note: unsigned binaries trip SmartScreen and may be flagged by Defender.
-# A security tool that gets quarantined by antivirus is dead on arrival —
+# A security tool that gets quarantined by antivirus is dead on arrival -
 # expect to add an exclusion, or an Authenticode certificate if this goes public.
 
 param(
@@ -19,7 +24,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if (-not (Test-Path $BinaryPath)) {
-    throw "pkgwatch.exe not found at $BinaryPath — pass -BinaryPath to point at it."
+    throw "pkgwatch.exe not found at $BinaryPath. Pass -BinaryPath to point at it."
 }
 
 $action = New-ScheduledTaskAction -Execute $BinaryPath -Argument "agent"

@@ -303,6 +303,32 @@ The agent detects the conflict, logs it, and shifts. It does not crash.
 
 ## Running as a service
 
-See `contrib/` — a systemd **user** unit, a launchd plist, and a Windows Scheduled Task registered at logon. All three watch `/health`.
+The retroactive half only works unattended. The gate protects an install as it
+happens; the package you installed six months ago that became known-bad this
+morning is found by a pass nobody triggered — so the daemon re-scans and
+re-matches every `scan_interval_hours` (default 6, `0` disables).
+
+```powershell
+powershell -ExecutionPolicy Bypass -File contrib\windows\install-task.ps1
+```
+
+```sh
+cp contrib/systemd/pkgwatch-agent.service ~/.config/systemd/user/
+systemctl --user enable --now pkgwatch-agent
+loginctl enable-linger $USER    # so it survives logout
+```
+
+`contrib/` also has a launchd plist. All three watch `/health`.
+
+Every completed pass logs at info even when nothing changed, which is
+deliberate: a scheduled task that is running and finding nothing looks exactly
+like one that stopped running a month ago, and the whole premise is that nobody
+is watching.
+
+`scan_paths` lists the project trees an unattended scan walks. It is empty by
+default — there is no safe guess at where your projects live, and walking a home
+directory to find out is slow enough that nobody would leave it switched on.
+Machine-wide installs, the host's own distribution packages and every running
+container are always scanned regardless.
 
 On Windows, unsigned binaries trip SmartScreen and may be flagged by Defender. On macOS they need `xattr -d com.apple.quarantine`.
