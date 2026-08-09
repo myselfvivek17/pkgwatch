@@ -75,6 +75,23 @@ type AgentConfig struct {
 	// something, which are what an incident is reconstructed from.
 	HistoryDays int `toml:"history_days"`
 
+	// ScanIntervalHours is how often the daemon re-scans and re-matches.
+	//
+	// The whole retroactive half of this tool depends on running without being
+	// asked: the package you installed six months ago that became known-bad this
+	// morning is only found by a pass nobody triggered. A scan costs a few
+	// hundred milliseconds, so the interval is about noticing promptly rather
+	// than about cost. Set to 0 to disable.
+	ScanIntervalHours int `toml:"scan_interval_hours"`
+
+	// ScanPaths are the project trees an unattended scan walks.
+	//
+	// Empty by default and deliberately so: there is no safe guess at where
+	// someone's projects live, and walking a home directory to find out is slow
+	// enough that nobody would leave it switched on. Machine-wide installs,
+	// containers and the host's own packages are always scanned regardless.
+	ScanPaths []string `toml:"scan_paths"`
+
 	// SyncLevel is one of findings|full|off. Default findings: sending the full
 	// inventory hands the hub a map of exploitable software on every machine,
 	// which should be a conscious choice (§3.3).
@@ -96,14 +113,15 @@ type HubConfig struct {
 func Default() Config {
 	return Config{
 		Agent: AgentConfig{
-			Bind:          "127.0.0.1",
-			NPMPort:       DefaultNPMPort,
-			PyPIPort:      DefaultPyPIPort,
-			DashboardPort: DefaultDashboardPort,
-			CooldownHours: 72,
-			BlockTier:     "high",
-			HistoryDays:   90,
-			SyncLevel:     "findings",
+			Bind:              "127.0.0.1",
+			NPMPort:           DefaultNPMPort,
+			PyPIPort:          DefaultPyPIPort,
+			DashboardPort:     DefaultDashboardPort,
+			CooldownHours:     72,
+			BlockTier:         "high",
+			HistoryDays:       90,
+			ScanIntervalHours: 6,
+			SyncLevel:         "findings",
 		},
 		Hub: HubConfig{
 			Bind: "0.0.0.0",

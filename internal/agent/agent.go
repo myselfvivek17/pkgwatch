@@ -121,6 +121,11 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 	defer gateCloser()
 
+	// The retroactive half. Without this the inventory only updates when someone
+	// remembers to type `pkgwatch scan`, which means the tool answers questions
+	// you already thought to ask.
+	go runPeriodicScans(ctx, cfg)
+
 	srv, err := web.New(web.ModeAgent, st.Hostname)
 	if err != nil {
 		return err

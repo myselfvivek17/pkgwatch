@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"text/tabwriter"
@@ -11,10 +10,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/myselfvivek17/pkgwatch/internal/agent"
-	"github.com/myselfvivek17/pkgwatch/internal/collect"
 	"github.com/myselfvivek17/pkgwatch/internal/config"
-	"github.com/myselfvivek17/pkgwatch/internal/match"
 	"github.com/myselfvivek17/pkgwatch/internal/repo"
+	"github.com/myselfvivek17/pkgwatch/internal/scanner"
 )
 
 func scanCmd() *cobra.Command {
@@ -23,13 +21,14 @@ func scanCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "scan [path...]",
 		Short: "Scan installed packages into the inventory",
-		Long: "Record what is installed on this machine.\n\n" +
-			"Machine-wide installs — the npm global root and every interpreter's\n" +
-			"site-packages — are always scanned. Project trees are scanned only where\n" +
-			"given, because there is no safe guess at where your projects live and\n" +
-			"walking a home directory to find out is slow enough that nobody runs it twice.\n\n" +
-			"Nothing found is executed. Python metadata is read straight off disk rather\n" +
-			"than by asking each interpreter, which would mean running it.",
+		Long: "Record what is installed on this machine, then match it against the\n" +
+			"advisory bundle.\n\n" +
+			"Machine-wide installs — the npm global root, every interpreter's\n" +
+			"site-packages, this machine's own distribution packages and those inside\n" +
+			"running containers — are always scanned. Project trees are scanned where\n" +
+			"given, or from scan_paths in the configuration.\n\n" +
+			"Nothing found is executed. Package metadata is read straight off disk, and\n" +
+			"container databases are copied out rather than queried from inside.",
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load(configPath)
@@ -53,166 +52,54 @@ func runScan(cmd *cobra.Command, cfg config.Config, paths []string, full bool) e
 		return err
 	}
 	defer st.Close()
-	store := st.Repo
 
-	var known collect.Known
-	if !full {
-		mtimes, err := store.KnownMTimes()
-		if err != nil {
-			return fmt.Errorf("read previous scan state: %w", err)
-		}
-		known = mtimes
+	roots, err := ScanRoots(cfg, paths)
+	if err != nil {
+		return err
+	}
+
+	outcome, err := scanner.Run(st.DB, st.Repo, st.Bundle, cfg, roots, full)
+	if err != nil {
+		return err
+	}
+	return reportScan(cmd, st.Repo, outcome)
+}
+
+// ScanRoots resolves the project trees to walk: the ones named on the command
+// line, or the configured ones when none are.
+func ScanRoots(cfg config.Config, paths []string) ([]string, error) {
+	if len(paths) == 0 {
+		paths = cfg.Agent.ScanPaths
 	}
 
 	roots := make([]string, 0, len(paths))
 	for _, path := range paths {
 		absolute, err := filepath.Abs(path)
 		if err != nil {
-			return fmt.Errorf("resolve %s: %w", path, err)
+			return nil, fmt.Errorf("resolve %s: %w", path, err)
 		}
 		roots = append(roots, absolute)
 	}
-
-	started := time.Now()
-	result := collect.Everything(roots, known)
-
-	// Collapse copies before writing. The inventory is keyed by purl (§6.1), so
-	// the same version installed in five projects is one row — and counting the
-	// copies as five inserts would report a machine as carrying far more than it
-	// does. The copy count is kept and reported, because "lodash 4.17.21 is here
-	// five times" is worth knowing even when it is one finding.
-	rows := make([]repo.PackageRow, 0, len(result.Packages))
-	seen := make(map[string]int, len(result.Packages))
-	copies := 0
-	for _, pkg := range result.Packages {
-		purl := pkg.PURL()
-		if index, dup := seen[purl]; dup {
-			copies++
-			// Prefer the widest scope: a package that is installed globally is on
-			// your PATH, and that is the fact that decides its score.
-			if scopeRank(pkg.Scope) > scopeRank(rows[index].Scope) {
-				rows[index].Scope = pkg.Scope
-				rows[index].InstallDir = pkg.InstallDir
-				rows[index].DirMTime = pkg.DirMTime
-			}
-			rows[index].HasScripts = rows[index].HasScripts || pkg.HasScripts
-			continue
-		}
-		seen[purl] = len(rows)
-		rows = append(rows, repo.PackageRow{
-			PURL:       purl,
-			Ecosystem:  pkg.Ecosystem,
-			Name:       pkg.Name,
-			Version:    pkg.Version,
-			InstallDir: pkg.InstallDir,
-			Scope:      pkg.Scope,
-			HasScripts: pkg.HasScripts,
-			DirMTime:   pkg.DirMTime,
-		})
-	}
-	result.Copies = copies
-
-	scanAt := time.Now()
-	inserted, updated, err := store.UpsertPackages(rows, scanAt)
-	if err != nil {
-		return fmt.Errorf("record inventory: %w", err)
-	}
-
-	gone, err := reconcilePresence(store, scanAt, result.ContainersScanned)
-	if err != nil {
-		return err
-	}
-	result.Gone = gone
-
-	pruned, err := store.Prune(time.Duration(cfg.Agent.HistoryDays)*24*time.Hour,
-		cfg.Agent.HubURL != "", scanAt)
-	if err != nil {
-		return fmt.Errorf("apply retention: %w", err)
-	}
-
-	if err := reportScan(cmd, store, result, inserted, updated, pruned, time.Since(started)); err != nil {
-		return err
-	}
-
-	// Match immediately. A scan that records an inventory and stops leaves the
-	// user to work out for themselves that a second command is what turns it
-	// into an answer.
-	return runWatch(cmd, st, scanAt)
+	return roots, nil
 }
 
-// reconcilePresence retires inventory rows for packages that are no longer
-// installed, and returns how many.
-//
-// Two ways a package stops being installed, and both have to be caught. Its
-// directory can disappear — an uninstall, or a deleted project. Or it can be
-// upgraded in place, leaving a directory that still exists but now holds a
-// different version, which a filesystem check alone would happily keep calling
-// installed.
-//
-// Nothing is deleted either way. The row is flagged, so the timeline can still
-// answer what this machine was carrying when an advisory landed.
-func reconcilePresence(store repo.Agent, scanAt time.Time, containersScanned bool) (int, error) {
-	superseded, err := store.MarkSuperseded(scanAt)
-	if err != nil {
-		return 0, fmt.Errorf("retire replaced packages: %w", err)
-	}
-
-	present, err := store.Present()
-	if err != nil {
-		return 0, err
-	}
-
-	var missing []string
-	for _, item := range present {
-		if item.InstallDir == "" {
-			continue
-		}
-
-		// A package inside a container has no path on this filesystem —
-		// InstallDir names the container. The only evidence of its presence is
-		// whether this scan found it, and that is only usable when the Docker
-		// collector actually ran: an engine that was down for one scan must not
-		// make every container look emptied.
-		if item.Scope == match.ScopeContainer {
-			if containersScanned && item.LastSeen < scanAt.Unix() {
-				missing = append(missing, item.PURL)
-			}
-			continue
-		}
-
-		// Everything else is stat-checked rather than rescanned. The inventory
-		// is a few thousand rows and a stat apiece is milliseconds, where
-		// re-walking every project tree to find out what is missing would cost
-		// seconds — and a scan that only covered one project must not conclude
-		// that everything else was uninstalled.
-		if _, err := os.Stat(item.InstallDir); os.IsNotExist(err) {
-			missing = append(missing, item.PURL)
-		}
-	}
-	if err := store.MarkGone(missing, scanAt); err != nil {
-		return 0, fmt.Errorf("retire uninstalled packages: %w", err)
-	}
-	return superseded + len(missing), nil
-}
-
-func reportScan(cmd *cobra.Command, store repo.Agent, result collect.Result,
-	inserted, updated int, pruned repo.Pruned, elapsed time.Duration) error {
-
+func reportScan(cmd *cobra.Command, store repo.Agent, outcome scanner.Outcome) error {
 	out := cmd.OutOrStdout()
 	fmt.Fprintf(out, "scanned in %s — %d new, %d seen again, %d unchanged since last scan%s\n",
-		elapsed.Round(time.Millisecond), inserted, updated, result.Unchanged, copiesNote(result.Copies))
+		outcome.Elapsed.Round(time.Millisecond), outcome.Inserted, outcome.Updated,
+		outcome.Unchanged, copiesNote(outcome.Copies))
 
 	// A scan that quietly covered less of the disk than you think reads as a
 	// clean machine, so say what could not be read.
-	if result.Skipped > 0 {
-		fmt.Fprintf(out, "%d directory(ies) looked like packages but could not be read\n", result.Skipped)
+	if outcome.Skipped > 0 {
+		fmt.Fprintf(out, "%d directory(ies) looked like packages but could not be read\n", outcome.Skipped)
 	}
-	if result.Gone > 0 {
-		fmt.Fprintf(out, "%d no longer installed — kept as history, no longer matched\n", result.Gone)
+	if outcome.Gone > 0 {
+		fmt.Fprintf(out, "%d no longer installed — kept as history, no longer matched\n", outcome.Gone)
 	}
-	if pruned.Any() {
+	if outcome.Pruned.Any() {
 		fmt.Fprintf(out, "retention: removed %d routine decision(s), %d event(s), %d session(s)\n",
-			pruned.RoutineDecisions, pruned.Events, pruned.Sessions)
+			outcome.Pruned.RoutineDecisions, outcome.Pruned.Events, outcome.Pruned.Sessions)
 	}
 
 	counts, err := store.EcosystemCounts()
@@ -238,6 +125,12 @@ func reportScan(cmd *cobra.Command, store repo.Agent, result collect.Result,
 	}
 	table.Flush()
 
+	if !outcome.Matched {
+		fmt.Fprintln(cmd.ErrOrStderr(),
+			"\nno advisory bundle installed — the inventory was recorded but nothing was matched")
+		return nil
+	}
+	reportWatch(out, outcome.Watch)
 	return nil
 }
 
@@ -255,20 +148,4 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
-}
-
-// scopeRank orders scopes by how much a finding in them matters. Global installs
-// are on your PATH; a project dependency in a directory you have not opened in a
-// year is not the same risk (§5.2).
-func scopeRank(scope string) int {
-	switch scope {
-	case match.ScopeGlobal:
-		return 4
-	case match.ScopeSystem:
-		return 3
-	case match.ScopeVenv:
-		return 2
-	default:
-		return 1
-	}
 }
