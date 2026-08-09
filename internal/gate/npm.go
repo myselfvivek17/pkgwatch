@@ -324,14 +324,21 @@ func repointDistTags(doc map[string]json.RawMessage, versions map[string]json.Ra
 // highestVersion picks the greatest stable release present, falling back to
 // prereleases only if that is all there is. A dist-tag repointed at a
 // prerelease would hand `npm install` a beta.
+//
+// Parsing is lenient here, unlike everywhere else. This only chooses which of
+// several already-cleared versions a tag points at — no advisory decision rests
+// on it — and old npm packages carry versions ("1.0", "v2.1.3") that strict
+// semver rejects. Being strict would drop every survivor on such a package and
+// delete the tag as if nothing were safe.
 func highestVersion(versions map[string]json.RawMessage) string {
-	var best *semver.Version
-	var bestRaw string
-	var fallback *semver.Version
-	var fallbackRaw string
+	var best, fallback *semver.Version
+	var bestRaw, fallbackRaw, anyRaw string
 
 	for version := range versions {
-		parsed, err := semver.StrictNewVersion(version)
+		if anyRaw == "" || version > anyRaw {
+			anyRaw = version
+		}
+		parsed, err := semver.NewVersion(version)
 		if err != nil {
 			continue
 		}
@@ -345,10 +352,18 @@ func highestVersion(versions map[string]json.RawMessage) string {
 			best, bestRaw = parsed, version
 		}
 	}
-	if bestRaw != "" {
+
+	switch {
+	case bestRaw != "":
 		return bestRaw
+	case fallbackRaw != "":
+		return fallbackRaw
+	default:
+		// Nothing parsed at all. Every survivor is still a version the gate
+		// cleared, so pointing the tag at one beats deleting it and failing the
+		// install outright.
+		return anyRaw
 	}
-	return fallbackRaw
 }
 
 // rewriteTarball points a version's download link back through this proxy.
