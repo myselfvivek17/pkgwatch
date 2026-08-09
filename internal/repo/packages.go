@@ -101,11 +101,15 @@ func (a Agent) UpsertPackages(packages []PackageRow, at time.Time) (inserted, up
 	return inserted, updated, tx.Commit()
 }
 
-// Packages returns the inventory, most recently seen first.
+// Packages returns what is installed now, ordered so two runs can be diffed.
+//
+// Retired rows are excluded: they are history, and listing them as inventory
+// would report software the machine no longer has.
 func (a Agent) Packages(limit int) ([]PackageRow, error) {
 	rows, err := a.DB.Query(`SELECT purl, ecosystem, name, version, install_path,
 		scope, has_scripts, COALESCE(path_mtime, 0)
-		FROM packages ORDER BY last_seen DESC, purl LIMIT ?`, limit)
+		FROM packages WHERE gone_at IS NULL
+		ORDER BY ecosystem, name, version LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}

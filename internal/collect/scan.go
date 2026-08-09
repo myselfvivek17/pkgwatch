@@ -44,6 +44,11 @@ func Global(known Known) Result {
 		out.Merge(Python(sitePackages, match.ScopeSystem, known))
 	}
 
+	// The host's own distribution packages. On a server this is where the
+	// exposed services live, and reading only the containers would leave the
+	// machine running them as the one nobody looks at.
+	out.Merge(SystemDistro(known))
+
 	// Containers are machine-wide too, and they are where the distribution
 	// advisories finally have something to match against. Absent Docker is a
 	// no-op.

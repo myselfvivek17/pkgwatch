@@ -71,6 +71,7 @@ func Root() *cobra.Command {
 		shellInitCmd(),
 
 		scanCmd(),
+		inventoryCmd(),
 		syncCmd(),
 		checkCmd(),
 		publishCmd(),
