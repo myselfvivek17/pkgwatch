@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,36 +20,44 @@ import (
 )
 
 func syncCmd() *cobra.Command {
-	var fromFile, sigPath, manifestPath string
+	var fromFile, fromDir, sigPath, manifestPath string
 	var allowDowngrade bool
 
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Fetch and install the advisory bundle",
-		Long: "Install an advisory bundle.\n\n" +
-			"--file installs a local bundle, which is how the publisher tests one and how an\n" +
-			"air-gapped machine is updated. Fetching over the network lands with the hub in M5.\n\n" +
+		Short: "Install advisory bundles",
+		Long: "Install one or more advisory bundles.\n\n" +
+			"--file installs a single bundle. --dir installs every bundle in a directory,\n" +
+			"which is what the publisher's --split output is: one signed bundle per\n" +
+			"ecosystem and release, of which a machine takes only the ones it needs.\n\n" +
 			"The signature is verified against the publisher key compiled into this binary in\n" +
-			"every case. A bundle is trusted because of who signed it, never because of where\n" +
-			"it came from.",
+			"every case, and it covers the scope as well as the version — so a bundle cannot\n" +
+			"be served as one it was not signed to be. A bundle is trusted because of who\n" +
+			"signed it, never because of where it came from.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return err
 			}
-			if fromFile == "" {
+			switch {
+			case fromDir != "":
+				if err := installDir(cmd, cfg, fromDir, allowDowngrade); err != nil {
+					return err
+				}
+			case fromFile != "":
+				if manifestPath == "" {
+					manifestPath = fromFile + ".json"
+				}
+				if sigPath == "" {
+					sigPath = fromFile + ".sig"
+				}
+				if err := installBundle(cmd, cfg, fromFile, manifestPath, sigPath, allowDowngrade); err != nil {
+					return err
+				}
+			default:
 				return fmt.Errorf("network sync lands with the hub in M5; " +
-					"use --file to install a bundle you already have")
-			}
-			if manifestPath == "" {
-				manifestPath = fromFile + ".json"
-			}
-			if sigPath == "" {
-				sigPath = fromFile + ".sig"
-			}
-			if err := installBundle(cmd, cfg, fromFile, manifestPath, sigPath, allowDowngrade); err != nil {
-				return err
+					"use --file or --dir to install bundles you already have")
 			}
 
 			// A new bundle is one of the two events that can change what is true
@@ -64,6 +74,7 @@ func syncCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&fromFile, "file", "", "install this advisory bundle file")
+	cmd.Flags().StringVar(&fromDir, "dir", "", "install every advisory bundle in this directory")
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "manifest file (default: <file>.json)")
 	cmd.Flags().StringVar(&sigPath, "sig", "", "signature file (default: <file>.sig)")
 	cmd.Flags().BoolVar(&allowDowngrade, "allow-downgrade", false,
@@ -71,7 +82,51 @@ func syncCmd() *cobra.Command {
 	return cmd
 }
 
+// installDir installs every bundle in a directory.
+//
+// Each is verified and staged on its own, and the merged database is rebuilt
+// once at the end rather than once per bundle — six bundles would otherwise
+// mean six full merges of everything before them.
+//
+// A bundle that fails verification stops the whole run. Installing the four
+// that passed and quietly skipping the fifth would leave a machine that looks
+// updated and is missing an ecosystem, which is the failure this project keeps
+// coming back to.
+func installDir(cmd *cobra.Command, cfg config.Config, dir string, allowDowngrade bool) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read bundle directory: %w", err)
+	}
+
+	var bundles []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".db") {
+			bundles = append(bundles, filepath.Join(dir, entry.Name()))
+		}
+	}
+	if len(bundles) == 0 {
+		return fmt.Errorf("no .db bundles found in %s", dir)
+	}
+	sort.Strings(bundles)
+
+	for _, path := range bundles {
+		if err := stageBundle(cmd, cfg, path, path+".json", path+".sig", allowDowngrade); err != nil {
+			return fmt.Errorf("%s: %w", filepath.Base(path), err)
+		}
+	}
+	return rebuildMerged(cmd, cfg)
+}
+
+// installBundle stages one bundle and rebuilds the merged database.
 func installBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPath, sigPath string, allowDowngrade bool) error {
+	if err := stageBundle(cmd, cfg, bundlePath, manifestPath, sigPath, allowDowngrade); err != nil {
+		return err
+	}
+	return rebuildMerged(cmd, cfg)
+}
+
+// stageBundle verifies a bundle and stores it as a source, without rebuilding.
+func stageBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPath, sigPath string, allowDowngrade bool) error {
 	data, err := os.ReadFile(bundlePath)
 	if err != nil {
 		return fmt.Errorf("read bundle: %w", err)
@@ -140,10 +195,21 @@ func installBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPa
 		return err
 	}
 
+	fmt.Fprintf(cmd.OutOrStdout(), "staged %s bundle %s\n", manifest.Scope, manifest.Version)
+	return nil
+}
+
+// rebuildMerged regenerates the single database the agent queries from every
+// verified source it holds.
+func rebuildMerged(cmd *cobra.Command, cfg config.Config) error {
 	sources, err := cfg.ScopedBundles()
 	if err != nil {
 		return err
 	}
+	if len(sources) == 0 {
+		return fmt.Errorf("no verified bundles to merge")
+	}
+
 	merged, err := bundle.Merge(sources, cfg.AdvisoryDBPath(), time.Now())
 	if err != nil {
 		return fmt.Errorf("rebuild the merged advisory database: %w", err)
@@ -156,7 +222,6 @@ func installBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPa
 		return fmt.Errorf("merged advisory database is unreadable: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "installed %s bundle %s\n", manifest.Scope, manifest.Version)
 	fmt.Fprintf(cmd.OutOrStdout(), "advisories now %d records from %d scope(s) · covers %s\n",
 		merged.RecordCount, len(sources), strings.Join(installed.Ecosystems, ", "))
 	return nil
