@@ -191,6 +191,8 @@ Adding PyPI, Debian, Alpine, Go and crates.io brings it to 522,525 records and *
 
 **When per-ecosystem bundles land, the ecosystem has to go into the signed message**, or a validly signed npm bundle served as `advisories-debian.db` silently zeroes Debian coverage — signature intact, agent blind.
 
+The split is deliberately deferred until M3's inventory exists and its detection has been measured on real machines: an oversized bundle is a bandwidth problem, a wrongly-scoped one is a security problem. Measurements, conditions and the safety properties any implementation must have are in [`docs/per-ecosystem-bundles.md`](docs/per-ecosystem-bundles.md) — including the finding that the split unit is **ecosystem plus release**, not ecosystem. Debian ships 13 releases in the bundle at ~24% of its records apiece, and splitting at release level takes the home server from 57 MB to 24.6 MB, a bigger saving than the ecosystem split before it.
+
 ### A bundle says what it covers
 
 Every bundle records the ecosystems it carries, and the agent refuses to answer
