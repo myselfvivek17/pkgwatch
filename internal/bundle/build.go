@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -67,7 +69,7 @@ CREATE TABLE bundle_meta (k TEXT PRIMARY KEY, v TEXT);
 // without this check a newer builder's output would simply return no rows,
 // which reads as "no advisories" rather than as an error. Bump it whenever
 // schemaSQL changes shape.
-const SchemaVersion = "4"
+const SchemaVersion = "5"
 
 // versionFormat constrains bundle versions to fixed-width, lexicographically
 // sortable strings: YYYYMMDD, optionally with an hourly delta suffix
@@ -89,6 +91,24 @@ func ValidateVersion(version string) error {
 			version)
 	}
 	return nil
+}
+
+// coveredEcosystems lists the base ecosystems present, sorted.
+//
+// Base, not the full identifier: a bundle carrying Debian:11 through Debian:14
+// covers Debian, and listing every release would make the meta row unbounded
+// without telling a caller anything it can act on.
+func coveredEcosystems(advisories []match.Advisory) []string {
+	seen := map[string]struct{}{}
+	for _, adv := range advisories {
+		seen[match.BaseEcosystem(adv.Ecosystem)] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for ecosystem := range seen {
+		out = append(out, ecosystem)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // advisoryKey identifies an advisory row for build-time deduplication. It is
@@ -134,6 +154,12 @@ func Build(path, version string, advisories []match.Advisory, builtAt time.Time)
 		"built_at":     builtAt.UTC().Format(time.RFC3339),
 		"record_count": fmt.Sprint(written),
 		"schema":       SchemaVersion,
+		// What this bundle actually covers, so an ecosystem that is simply
+		// absent can be reported as unknown rather than as clean. A bundle built
+		// without the PyPI feed answers "no advisories" for every Python package
+		// on the machine, which is indistinguishable from safety and is the one
+		// wrong answer this tool must never give.
+		"ecosystems": strings.Join(coveredEcosystems(advisories), ","),
 	}
 	for k, v := range meta {
 		if _, err := db.Exec("INSERT INTO bundle_meta (k, v) VALUES (?, ?)", k, v); err != nil {

@@ -73,7 +73,7 @@ Adding Debian, Alpine, Go and crates.io brings it to 496,740 records and **110 M
 - **Enumerated versions are dropped when the advisory also gives ranges.** Debian enumerates every affected version across four releases; the range already says the same thing. That alone was 7 million rows and 160 MB. Malware records keep their enumeration even when a range exists — a range spanning a non-contiguous set would mark clean versions in the gap as malicious, and "this package is malware" must never be reached by inference.
 - **Summaries are stored once per advisory id**, not once per affected package. One CVE lands in four Debian releases with identical prose averaging ~245 characters.
 
-110 MB is still more than a fleet-wide bundle should be, and per-ecosystem bundles are the obvious next step — an agent with no Debian packages has no use for 200,000 Debian rows.
+110 MB is still more than a fleet-wide bundle should be, and per-ecosystem bundles are the obvious next step — an agent with no Debian packages has no use for 200,000 Debian rows. **When that lands, the ecosystem has to go into the signed message**, or a validly signed npm bundle served as `advisories-debian.db` silently zeroes Debian coverage — signature intact, agent blind.
 
 A bundle is trusted because of who signed it, never because of where it came from. Verification is identical and mandatory whether the bytes came from the publisher or from your own hub, and `sync` refuses:
 

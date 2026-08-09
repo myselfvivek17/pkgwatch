@@ -160,6 +160,39 @@ func TestAffectsRejectsUnparseableVersion(t *testing.T) {
 	}
 }
 
+// Real feeds carry bounds no parser accepts — PYSEC's requests records give an
+// introduced bound of "2.23.0-py2.7". Abandoning the advisory on the first one
+// discards every other interval in it, which is a far larger false negative
+// than the bad bound itself.
+func TestUnparseableBoundDoesNotDiscardSiblingRanges(t *testing.T) {
+	adv := Advisory{
+		ID: "PYSEC-test", Kind: KindVulnerability,
+		Ecosystem: EcosystemPyPI, PackageName: "requests",
+		Ranges: []Range{
+			{Introduced: "2.23.0-py2.7", Fixed: "2.30.0"}, // not a PEP 440 version
+			{Introduced: "1.0.0", Fixed: "2.0.0"},         // perfectly usable
+		},
+	}
+
+	affected, err := Affects(adv, Package{Ecosystem: EcosystemPyPI, Name: "requests", Version: "1.5.0"})
+	if err != nil {
+		t.Fatalf("a usable interval should still be evaluated: %v", err)
+	}
+	if !affected {
+		t.Error("1.5.0 falls inside the second interval and must match")
+	}
+
+	// When nothing matched the error still surfaces: coverage was incomplete,
+	// which is not the same as a clean result.
+	affected, err = Affects(adv, Package{Ecosystem: EcosystemPyPI, Name: "requests", Version: "2.50.0"})
+	if affected {
+		t.Error("2.50.0 is outside every usable interval")
+	}
+	if err == nil {
+		t.Error("the unparseable bound must still be reported, or the miss reads as clean")
+	}
+}
+
 func TestScoreAndTier(t *testing.T) {
 	old := time.Now().Add(-120 * 24 * time.Hour)
 	now := time.Now()

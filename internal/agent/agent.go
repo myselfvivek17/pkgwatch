@@ -102,16 +102,24 @@ func (s *State) Close() error { return s.DB.Close() }
 // BundleWarning reports a bundle that exists but could not be used, or nil.
 func (s *State) BundleWarning() error { return s.warnBundleError }
 
-// Run serves the agent's local dashboard.
+// Run serves the agent's local dashboard and the two registry gates.
 //
-// The gate proxies (:4873 / :4874), inventory scanning and hub sync are not
-// built yet; this is the M0/M0.5 surface only.
+// Inventory scanning and hub sync are not built yet.
 func Run(ctx context.Context, cfg config.Config) error {
 	st, err := Open(cfg)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
+
+	// The shared gate ports serve whatever is configured to point at them, so
+	// there is no install session to attribute their decisions to — that is what
+	// `pkgwatch npm` is for, and it runs its own proxy on its own port.
+	gateCloser, err := serveGates(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer gateCloser()
 
 	srv, err := web.New(web.ModeAgent, st.Hostname)
 	if err != nil {

@@ -98,16 +98,28 @@ func Affects(adv Advisory, pkg Package) (bool, error) {
 		}
 	}
 
+	// One unparseable bound must not discard the whole advisory. Real feeds carry
+	// them: PYSEC records for requests give an introduced bound of "2.23.0-py2.7",
+	// which is not a PEP 440 version, and abandoning the record on the first
+	// error silently dropped every other interval in it — a false negative
+	// several times larger than the one bad bound deserves.
+	//
+	// The error is still returned when nothing matched, so the caller can say
+	// coverage was incomplete rather than report a clean result.
+	var firstErr error
 	for _, r := range adv.Ranges {
 		in, err := inRange(cmp, pkg.Version, r)
 		if err != nil {
-			return false, err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		if in {
 			return true, nil
 		}
 	}
-	return false, nil
+	return false, firstErr
 }
 
 // inRange evaluates one interval: introduced <= v, and v < fixed, and

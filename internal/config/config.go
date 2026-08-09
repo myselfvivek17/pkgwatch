@@ -33,7 +33,24 @@ type AgentConfig struct {
 
 	// CooldownHours treats any version published more recently than this as
 	// prompt-worthy regardless of advisories — advisories lag attacks (§5.1).
+	//
+	// Non-zero also makes the npm gate request full packuments rather than the
+	// abbreviated ones npm asks for, because only the full document carries
+	// publish times. Set to 0 for smaller registry responses and no cooldown.
 	CooldownHours int `toml:"cooldown_hours"`
+
+	// BlockTier is the lowest finding tier that stops an install. Malware always
+	// blocks regardless — it is an active attack, not a latent weakness, and the
+	// two do not share a scale.
+	//
+	// Default high, not medium: npm's corpus has a low or medium advisory
+	// against a large share of transitive dependencies, and a gate that fires on
+	// all of them gets switched off in a week.
+	BlockTier string `toml:"block_tier"`
+
+	// Registry upstreams. Empty means the public registry.
+	NPMUpstream  string `toml:"npm_upstream"`
+	PyPIUpstream string `toml:"pypi_upstream"`
 
 	// SyncLevel is one of findings|full|off. Default findings: sending the full
 	// inventory hands the hub a map of exploitable software on every machine,
@@ -61,6 +78,7 @@ func Default() Config {
 			PyPIPort:      DefaultPyPIPort,
 			DashboardPort: DefaultDashboardPort,
 			CooldownHours: 24,
+			BlockTier:     "high",
 			SyncLevel:     "findings",
 		},
 		Hub: HubConfig{

@@ -10,7 +10,10 @@ import (
 	"database/sql"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/myselfvivek17/pkgwatch/internal/match"
 )
 
 type Agent struct{ DB *sql.DB }
@@ -69,6 +72,23 @@ type BundleInfo struct {
 	Schema      string
 	BuiltAt     time.Time
 	RecordCount int
+
+	// Ecosystems is what this bundle actually covers. An ecosystem absent from
+	// the list has no records at all, which must be reported as unknown rather
+	// than as clean — "no advisories on file" and "we never looked" are the same
+	// query result and opposite answers.
+	Ecosystems []string
+}
+
+// Covers reports whether the bundle carries records for an ecosystem.
+func (b BundleInfo) Covers(ecosystem string) bool {
+	base := match.BaseEcosystem(ecosystem)
+	for _, covered := range b.Ecosystems {
+		if covered == base {
+			return true
+		}
+	}
+	return false
 }
 
 // Bundle reads bundle_meta from the attached advisory database. Callers pass
@@ -104,6 +124,10 @@ func Bundle(handle *sql.DB, attached bool) (BundleInfo, error) {
 		case "record_count":
 			if n, err := strconv.Atoi(v); err == nil {
 				info.RecordCount = n
+			}
+		case "ecosystems":
+			if v != "" {
+				info.Ecosystems = strings.Split(v, ",")
 			}
 		}
 	}

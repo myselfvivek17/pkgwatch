@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/myselfvivek17/pkgwatch/internal/buildinfo"
 	"github.com/myselfvivek17/pkgwatch/internal/config"
 	"github.com/myselfvivek17/pkgwatch/internal/hub"
+	"github.com/myselfvivek17/pkgwatch/internal/match"
 	"github.com/myselfvivek17/pkgwatch/internal/repo"
 )
 
@@ -58,9 +60,9 @@ func Root() *cobra.Command {
 		hubCmd(),
 		statusCmd(),
 
-		stub("npm [args...]", "Run a gated npm install", "M2", cobra.ArbitraryArgs),
-		stub("pip [args...]", "Run a gated pip install", "M2", cobra.ArbitraryArgs),
-		stub("shell-init [bash|zsh|fish|powershell]", "Print shell integration", "M2", cobra.ExactArgs(1)),
+		npmCmd(),
+		pipCmd(),
+		shellInitCmd(),
 
 		stub("scan", "Scan installed packages into the inventory", "M3", cobra.NoArgs),
 		syncCmd(),
@@ -189,6 +191,17 @@ func printStatus(cmd *cobra.Command, cfg config.Config) error {
 			age = fmt.Sprintf("built %s ago", time.Since(st.Bundle.BuiltAt).Round(time.Hour))
 		}
 		fmt.Fprintf(w, "advisories\t%s · %d records · %s\n", st.Bundle.Version, st.Bundle.RecordCount, age)
+		// Coverage, not just volume. A half-million records means nothing if the
+		// ecosystem you install from is not among them.
+		if len(st.Bundle.Ecosystems) > 0 {
+			fmt.Fprintf(w, "covers\t%s\n", strings.Join(st.Bundle.Ecosystems, ", "))
+			for _, gated := range []string{match.EcosystemNPM, match.EcosystemPyPI} {
+				if !st.Bundle.Covers(gated) {
+					fmt.Fprintf(w, "\tWARNING: %s installs are gated but this bundle has no %s advisories\n",
+						gated, gated)
+				}
+			}
+		}
 	case st.BundleWarning() != nil:
 		fmt.Fprintf(w, "advisories\tPRESENT BUT UNUSABLE — %v\n", st.BundleWarning())
 	default:
@@ -252,6 +265,11 @@ func signalContext() (context.Context, context.CancelFunc) {
 func Execute() int {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	if err := Root().Execute(); err != nil {
+		// A wrapped package manager's exit status passes through unchanged, so
+		// `pkgwatch npm ci` behaves like `npm ci` in a script.
+		if code := ExitCode(err); code >= 0 {
+			return code
+		}
 		return 1
 	}
 	return 0

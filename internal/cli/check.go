@@ -170,6 +170,16 @@ func runCheck(out io.Writer, cfg config.Config, pkg match.Package) error {
 		return err
 	}
 
+	// A bundle built without this ecosystem's feed returns zero rows for every
+	// package in it, and "no advisories match" would read as a clean bill of
+	// health. Refuse rather than answer a question we cannot answer.
+	if len(info.Ecosystems) > 0 && !info.Covers(pkg.Ecosystem) {
+		return fmt.Errorf("bundle %s carries no %s advisories at all "+
+			"(it covers %s) — this command cannot tell you anything about %s",
+			info.Version, match.BaseEcosystem(pkg.Ecosystem),
+			strings.Join(info.Ecosystems, ", "), pkg.Name)
+	}
+
 	advisories, err := repo.LookupAdvisories(handle, pkg.Ecosystem, pkg.Name)
 	if err != nil {
 		return err
