@@ -167,6 +167,12 @@ func Run(ctx context.Context, cfg config.Config) error {
 		rows, err := st.Repo.OpenFindings(st.BundleAttached, f)
 		return rows, st.BundleAttached, err
 	}
+	// Writes only on the agent. A hub renders another machine's findings, and
+	// the agent is authoritative for its own data (§3.3).
+	srv.Acknowledge = st.Repo.AcknowledgeFinding
+	srv.Ignore = func(purl, advisoryID, note string, days int) error {
+		return st.Repo.IgnoreFinding(purl, advisoryID, note, time.Now().AddDate(0, 0, days))
+	}
 
 	router := chi.NewRouter()
 	router.Get("/health", daemon.HealthHandler("agent", started, func() (bool, string) {

@@ -102,6 +102,12 @@ type Server struct {
 	// look" are the same empty column and opposite meanings.
 	Findings func(repo.FindingFilter) ([]repo.Finding, bool, error)
 
+	// Acknowledge and Ignore are the page's only writes. Both are optional: the
+	// hub renders findings from its agents read-only, because the agent is
+	// authoritative for its own data (§3.3) and sync is outbound-only.
+	Acknowledge func(purl, advisoryID, note string) error
+	Ignore      func(purl, advisoryID, note string, days int) error
+
 	// HistoryDays is the retention window, shown so a timeline that stops is
 	// distinguishable from a machine that did nothing.
 	HistoryDays int
@@ -208,6 +214,9 @@ func (s *Server) Routes(r chi.Router) {
 	}
 	if s.Findings != nil {
 		r.Get("/findings", s.handleFindings)
+		if s.Acknowledge != nil && s.Ignore != nil {
+			r.Post("/findings/triage", guard(s.handleTriage))
+		}
 	}
 }
 

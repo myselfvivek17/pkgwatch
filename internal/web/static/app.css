@@ -311,3 +311,12 @@ body { margin: 0; background: var(--bg); }
 .pw-promoted { color: var(--sev-high-fg); }
 
 .pw-notes { margin-top: 16px; display: grid; gap: 8px; max-width: 74ch; }
+
+.pw-triage form { display: flex; gap: 6px; align-items: center; }
+.pw-triage button, .pw-triage input {
+  background: var(--bg-sunken); color: var(--text-dim); border: 1px solid var(--border);
+  border-radius: 5px; padding: 3px 7px; font: inherit; font-size: 11px; cursor: pointer;
+}
+.pw-triage button:hover { background: var(--bg-hover); color: var(--text); }
+.pw-triage input { width: 44px; cursor: text; text-align: right; }
+.pw-ignore { display: flex; gap: 3px; align-items: center; color: var(--text-faint); font-size: 11px; }
