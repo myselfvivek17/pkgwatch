@@ -167,3 +167,64 @@ func TestCoverageIsMatchedPerRelease(t *testing.T) {
 		t.Errorf("CoveredBases() = %v, want one entry per distinct ecosystem", bases)
 	}
 }
+
+// The audit has to tell an upgrade, a rename and a disappearance apart, because
+// only the third means the collector lost a row — and a lost row closes that
+// package's findings. Matching on ecosystem would call the rename a
+// disappearance, which is what a real Ubuntu:24.04 -> Ubuntu:24.04:LTS change
+// did to 1,830 host packages that had never moved.
+func TestRetiredPackagesDistinguishesRenameFromLoss(t *testing.T) {
+	store := newAgentDB(t)
+	first := time.Now().Add(-time.Hour)
+
+	upgraded := row("pkg:npm/lodash@4.17.20", "lodash", "4.17.20", "/app/node_modules/lodash")
+	renamed := row("pkg:deb/ubuntu/curl@8.5.0?distro=ubuntu-24.04", "curl", "8.5.0", "/var/lib/dpkg/status")
+	renamed.Ecosystem = "Ubuntu:24.04"
+	vanished := row("pkg:npm/chalk@5.0.0", "chalk", "5.0.0", "/app/node_modules/chalk")
+
+	if _, _, err := store.UpsertPackages([]repo.PackageRow{upgraded, renamed, vanished}, first); err != nil {
+		t.Fatal(err)
+	}
+
+	// lodash upgrades in place; curl keeps its version but its ecosystem
+	// identifier changes; chalk is simply not seen again.
+	second := time.Now()
+	newLodash := row("pkg:npm/lodash@4.17.21", "lodash", "4.17.21", "/app/node_modules/lodash")
+	newCurl := row("pkg:deb/ubuntu/curl@8.5.0?distro=ubuntu-24.04:LTS", "curl", "8.5.0", "/var/lib/dpkg/status")
+	newCurl.Ecosystem = "Ubuntu:24.04:LTS"
+	if _, _, err := store.UpsertPackages([]repo.PackageRow{newLodash, newCurl}, second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MarkSuperseded(second); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkGone([]string{"pkg:npm/chalk@5.0.0",
+		"pkg:deb/ubuntu/curl@8.5.0?distro=ubuntu-24.04"}, second); err != nil {
+		t.Fatal(err)
+	}
+
+	retired, err := store.RetiredPackages(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]repo.PackageRow{}
+	for _, pkg := range retired {
+		got[pkg.Name] = pkg
+	}
+	if len(got) != 3 {
+		t.Fatalf("retired = %+v, want lodash, curl and chalk", retired)
+	}
+
+	if got["lodash"].ReplacedBy != "4.17.21" || got["lodash"].ReplacedEcosystem != "npm" {
+		t.Errorf("upgrade: ReplacedBy = %q in %q, want 4.17.21 in npm",
+			got["lodash"].ReplacedBy, got["lodash"].ReplacedEcosystem)
+	}
+	if got["curl"].ReplacedBy != "8.5.0" || got["curl"].ReplacedEcosystem != "Ubuntu:24.04:LTS" {
+		t.Errorf("rename: ReplacedBy = %q in %q, want 8.5.0 in Ubuntu:24.04:LTS",
+			got["curl"].ReplacedBy, got["curl"].ReplacedEcosystem)
+	}
+	if got["chalk"].ReplacedBy != "" {
+		t.Errorf("loss: ReplacedBy = %q, want empty — nothing replaced it",
+			got["chalk"].ReplacedBy)
+	}
+}

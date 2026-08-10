@@ -16,11 +16,13 @@ type PackageRow struct {
 	HasScripts bool
 	DirMTime   int64
 
-	// Set only by RetiredPackages. GoneAt is when the row stopped being seen,
-	// and Superseded says whether something else now occupies the same install
-	// path — the difference between an upgrade and a disappearance.
-	GoneAt     int64
-	Superseded bool
+	// Set only by RetiredPackages. GoneAt is when the row stopped being seen;
+	// ReplacedBy and ReplacedEcosystem describe the live row that now occupies
+	// the same install path, if there is one — the difference between an upgrade
+	// and a disappearance. ReplacedBy empty means nothing took its place.
+	GoneAt            int64
+	ReplacedBy        string
+	ReplacedEcosystem string
 }
 
 // KnownMTimes returns the recorded modification time of every install
@@ -146,17 +148,29 @@ func (a Agent) Packages(limit int) ([]PackageRow, error) {
 // exists because a rescan reporting no change proves nothing about whether the
 // previous scan's retirements were right.
 //
-// Superseded is the discriminator. An upgrade leaves a live row at the same
-// install path, so superseded rows are ordinary and expected; a retirement with
+// The replacement is the discriminator. An upgrade leaves a live row at the same
+// install path, so replaced rows are ordinary and expected; a retirement with
 // nothing taking its place is the shape a lost row has.
+//
+// Deliberately matched on name and install path, NOT on ecosystem. The purl
+// carries the ecosystem, so changing an ecosystem identifier changes the key and
+// retires every row under the old one — which is exactly what happened when the
+// host collector started emitting Ubuntu:24.04:LTS instead of Ubuntu:24.04, and
+// 1,830 packages that had never moved retired at once. Requiring the ecosystem
+// to match would report all of them as vanished.
 func (a Agent) RetiredPackages(limit int) ([]PackageRow, error) {
 	rows, err := a.DB.Query(`SELECT p.purl, p.ecosystem, p.name, p.version,
 		p.install_path, p.scope, p.has_scripts, COALESCE(p.path_mtime, 0), p.gone_at,
-		EXISTS(SELECT 1 FROM packages q
+		COALESCE((SELECT q.version FROM packages q
 			WHERE q.gone_at IS NULL
-			  AND q.ecosystem = p.ecosystem
 			  AND q.name = p.name
-			  AND q.install_path = p.install_path)
+			  AND q.install_path = p.install_path
+			ORDER BY q.last_seen DESC LIMIT 1), ''),
+		COALESCE((SELECT q.ecosystem FROM packages q
+			WHERE q.gone_at IS NULL
+			  AND q.name = p.name
+			  AND q.install_path = p.install_path
+			ORDER BY q.last_seen DESC LIMIT 1), '')
 		FROM packages p WHERE p.gone_at IS NOT NULL
 		ORDER BY p.gone_at DESC, p.ecosystem, p.name, p.version LIMIT ?`, limit)
 	if err != nil {
@@ -167,14 +181,13 @@ func (a Agent) RetiredPackages(limit int) ([]PackageRow, error) {
 	var out []PackageRow
 	for rows.Next() {
 		var pkg PackageRow
-		var hasScripts, superseded int
+		var hasScripts int
 		if err := rows.Scan(&pkg.PURL, &pkg.Ecosystem, &pkg.Name, &pkg.Version,
 			&pkg.InstallDir, &pkg.Scope, &hasScripts, &pkg.DirMTime, &pkg.GoneAt,
-			&superseded); err != nil {
+			&pkg.ReplacedBy, &pkg.ReplacedEcosystem); err != nil {
 			return nil, err
 		}
 		pkg.HasScripts = hasScripts != 0
-		pkg.Superseded = superseded != 0
 		out = append(out, pkg)
 	}
 	return out, rows.Err()

@@ -112,10 +112,10 @@ func printRetired(out io.Writer, st *agent.State, ecosystem, scope string, limit
 
 	table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	if !plain {
-		fmt.Fprintln(table, "RETIRED\tREPLACED\tECOSYSTEM\tNAME\tVERSION\tWHERE")
+		fmt.Fprintln(table, "RETIRED\tREPLACED BY\tECOSYSTEM\tNAME\tVERSION\tWHERE")
 	}
 
-	shown, orphaned := 0, 0
+	shown, orphaned, renamed := 0, 0, 0
 	for _, pkg := range rows {
 		if ecosystem != "" && !strings.EqualFold(pkg.Ecosystem, ecosystem) {
 			continue
@@ -124,10 +124,19 @@ func printRetired(out io.Writer, st *agent.State, ecosystem, scope string, limit
 			continue
 		}
 		shown++
-		replaced := "yes"
-		if !pkg.Superseded {
-			replaced = "NO"
+
+		// Naming the replacement rather than saying "yes" is what makes an
+		// ecosystem rename legible: same version, different ecosystem, means the
+		// identifier moved and the package never did.
+		replaced := "NOTHING"
+		switch {
+		case pkg.ReplacedBy == "":
 			orphaned++
+		case pkg.ReplacedEcosystem != pkg.Ecosystem:
+			replaced = pkg.ReplacedEcosystem + " " + pkg.ReplacedBy
+			renamed++
+		default:
+			replaced = pkg.ReplacedBy
 		}
 		when := time.Unix(pkg.GoneAt, 0).Format("2006-01-02 15:04")
 		if plain {
@@ -154,6 +163,14 @@ func printRetired(out io.Writer, st *agent.State, ecosystem, scope string, limit
 		fmt.Fprintf(out, "%d were retired with nothing replacing them at the same path. "+
 			"Expected for a real uninstall;\notherwise it is a collector that lost the row, "+
 			"which closes that package's findings.\n", orphaned)
+	}
+	// Same package, same path, different ecosystem: the identifier changed, so
+	// the purl changed, so the row retired and came back under a new key. Worth
+	// naming because it retires and re-detects in bulk and looks alarming.
+	if renamed > 0 {
+		fmt.Fprintf(out, "%d moved to a different ecosystem identifier rather than being "+
+			"removed — the\npackage never left; its purl changed, so findings closed and "+
+			"were detected again.\n", renamed)
 	}
 	return nil
 }
