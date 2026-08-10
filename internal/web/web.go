@@ -48,7 +48,7 @@ func nav(mode Mode, active string) []NavItem {
 	items := []NavItem{
 		first,
 		{Key: "timeline", Label: "Timeline", Href: "/timeline", Enabled: true},
-		{Key: "findings", Label: "Findings triage", Href: "/findings"},
+		{Key: "findings", Label: "Findings triage", Href: "/findings", Enabled: true},
 		{Key: "block", Label: "Install block", Href: "/sessions"},
 		{Key: "credentials", Label: "Credential rotation", Href: "/rotate"},
 		{Key: "inventory", Label: "Inventory", Href: "/inventory"},
@@ -96,6 +96,11 @@ type Server struct {
 	// without this package knowing which database it is reading.
 	Events      func(repo.EventFilter) ([]repo.Event, error)
 	OldestEvent func() (time.Time, error)
+
+	// Findings backs the triage page. It returns whether the advisory bundle was
+	// attached alongside the rows, because "no fix listed" and "we could not
+	// look" are the same empty column and opposite meanings.
+	Findings func(repo.FindingFilter) ([]repo.Finding, bool, error)
 
 	// HistoryDays is the retention window, shown so a timeline that stops is
 	// distinguishable from a machine that did nothing.
@@ -177,7 +182,7 @@ type badgeRow struct {
 // it surfaces at construction rather than on the first request.
 func New(mode Mode, hostname string) (*Server, error) {
 	s := &Server{Mode: mode, Hostname: hostname, templates: map[string]*template.Template{}}
-	for _, page := range []string{"overview", "design", "timeline"} {
+	for _, page := range []string{"overview", "design", "timeline", "findings"} {
 		tpl, err := template.ParseFS(assets,
 			"templates/layout.html",
 			"templates/partials/*.html",
@@ -200,6 +205,9 @@ func (s *Server) Routes(r chi.Router) {
 	if s.Events != nil {
 		r.Get("/timeline", s.handleTimeline)
 		r.Get("/events/stream", s.handleStream)
+	}
+	if s.Findings != nil {
+		r.Get("/findings", s.handleFindings)
 	}
 }
 

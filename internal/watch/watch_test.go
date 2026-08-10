@@ -88,7 +88,7 @@ func TestWatchFindsAffectedInstalledPackage(t *testing.T) {
 		t.Fatalf("New = %d, want 1 — only 4.17.20 is affected", report.New)
 	}
 
-	findings, err := store.OpenFindings(true, 10, false)
+	findings, err := store.OpenFindings(true, repo.FindingFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestBaselineFilesLowAndMediumQuietly(t *testing.T) {
 	}
 
 	// Filed, not hidden: it must still be listed.
-	open, err := store.OpenFindings(true, 10, false)
+	open, err := store.OpenFindings(true, repo.FindingFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestBaselineStillAnnouncesMalware(t *testing.T) {
 		t.Errorf("malware was filed quietly on the baseline pass")
 	}
 
-	open, err := store.OpenFindings(true, 10, false)
+	open, err := store.OpenFindings(true, repo.FindingFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestUninstallClosesFinding(t *testing.T) {
 	if report.Resolved != 1 {
 		t.Errorf("Resolved = %d, want 1", report.Resolved)
 	}
-	open, err := store.OpenFindings(true, 10, false)
+	open, err := store.OpenFindings(true, repo.FindingFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestFixableFiltersBeforeTheLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	worst, err := store.OpenFindings(true, 1, false)
+	worst, err := store.OpenFindings(true, repo.FindingFilter{Limit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestFixableFiltersBeforeTheLimit(t *testing.T) {
 		t.Fatalf("expected malware to sort first, got %+v", worst)
 	}
 
-	fixable, err := store.OpenFindings(true, 1, true)
+	fixable, err := store.OpenFindings(true, repo.FindingFilter{Limit: 1, FixableOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestReturningPackageReopensFinding(t *testing.T) {
 		t.Errorf("Reopened = %d, want 1", report.Reopened)
 	}
 
-	open, err := store.OpenFindings(true, 10, false)
+	open, err := store.OpenFindings(true, repo.FindingFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func TestReopenKeepsQuietFindingsQuiet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	open, err := store.OpenFindings(true, 10, false)
+	open, err := store.OpenFindings(true, repo.FindingFilter{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

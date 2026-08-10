@@ -159,23 +159,48 @@ func (a Agent) ReopenFindingsForPresentPackages() (int, error) {
 // findings are still listed — they are recorded facts — but with no summary,
 // because inventing one would be worse than an empty column.
 //
-// fixableOnly restricts to findings with a published fix. It has to happen in
-// the query rather than over the returned slice: filtering afterwards would
-// mean "the fixable ones among the worst N", which reads as "the fixable ones"
-// and is not the same list — a machine can have a hundred unfixable criticals
-// burying every finding you could act on.
-func (a Agent) OpenFindings(attached bool, limit int, fixableOnly bool) ([]Finding, error) {
+// Every restriction in FindingFilter is applied in the query rather than over
+// the returned slice. Filtering afterwards would mean "the matching ones among
+// the worst N", which reads as "the matching ones" and is not the same list — a
+// machine can have a hundred unfixable criticals burying every finding you
+// could act on.
+type FindingFilter struct {
+	Limit       int
+	FixableOnly bool
+	Tier        string
+}
+
+func (a Agent) OpenFindings(attached bool, f FindingFilter) ([]Finding, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	fixableOnly := f.FixableOnly
+
+	// Two spellings because the two queries differ in shape: one selects from
+	// findings directly, the other from a CTE whose columns are already
+	// unqualified. Rewriting one into the other with string replacement would
+	// work until a column named "tier" appeared somewhere else in the query.
+	tierClause, cteTierClause := "", ""
+	var tierArg []any
+	if f.Tier != "" {
+		tierClause = " AND f.tier = ?"
+		cteTierClause = " AND tier = ?"
+		tierArg = append(tierArg, f.Tier)
+	}
+
 	if !attached {
 		if fixableOnly {
 			// Whether a fix exists is only knowable from the bundle. Returning
 			// everything here would claim each one is unfixable.
 			return nil, nil
 		}
+		args := append(append([]any{}, tierArg...), limit)
 		rows, err := a.DB.Query(`SELECT f.purl, f.advisory_id, f.score, f.tier, f.state,
 			f.detected_at, '', NULL, ''
 			FROM findings f
-			WHERE f.state NOT IN ('ignored', 'fixed')
-			ORDER BY f.score DESC, f.purl LIMIT ?`, limit)
+			WHERE f.state NOT IN ('ignored', 'fixed')`+tierClause+`
+			ORDER BY f.score DESC, f.purl LIMIT ?`, args...)
 		if err != nil {
 			return nil, err
 		}
@@ -219,14 +244,15 @@ func (a Agent) OpenFindings(attached bool, limit int, fixableOnly bool) ([]Findi
 		)
 		SELECT purl, advisory_id, score, tier, state, detected_at, summary, base_cvss, fixed_in
 		FROM open
-		WHERE (? = 0 OR fixed_in <> '')
+		WHERE (? = 0 OR fixed_in <> '')` + cteTierClause + `
 		ORDER BY score DESC, purl LIMIT ?`
 
 	only := 0
 	if fixableOnly {
 		only = 1
 	}
-	rows, err := a.DB.Query(query, only, limit)
+	args := append(append([]any{only}, tierArg...), limit)
+	rows, err := a.DB.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}

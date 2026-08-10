@@ -163,6 +163,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 	srv.Events = st.Repo.Events
 	srv.OldestEvent = st.Repo.OldestEventAt
 	srv.HistoryDays = cfg.Agent.HistoryDays
+	srv.Findings = func(f repo.FindingFilter) ([]repo.Finding, bool, error) {
+		rows, err := st.Repo.OpenFindings(st.BundleAttached, f)
+		return rows, st.BundleAttached, err
+	}
 
 	router := chi.NewRouter()
 	router.Get("/health", daemon.HealthHandler("agent", started, func() (bool, string) {

@@ -286,3 +286,28 @@ body { margin: 0; background: var(--bg); }
 @media (prefers-reduced-motion: reduce) {
   .pw-row, .pw-row-detail { animation: none }
 }
+
+/* ---- findings table ------------------------------------------------------ */
+
+.pw-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pw-table th {
+  text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-faint); font-weight: 500; padding: 0 10px 8px 10px; border-bottom: 1px solid var(--border);
+}
+.pw-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.pw-table tr:hover td { background: var(--bg-hover); }
+.pw-num { text-align: right; white-space: nowrap; }
+.pw-dim { color: var(--text-faint); }
+.pw-wrap { overflow-wrap: anywhere; }
+.pw-summary { margin-top: 3px; font-size: 11.5px; max-width: 70ch; }
+
+/* A fix that exists is the only column a person can act on, so it is the one
+   thing on the row with colour. Everything else is severity theatre if there is
+   nothing to do about it. */
+.pw-fix { color: var(--sev-medium-fg); }
+.pw-fixable td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* Score above CVSS is deliberate (§5.2), not a rendering error. */
+.pw-promoted { color: var(--sev-high-fg); }
+
+.pw-notes { margin-top: 16px; display: grid; gap: 8px; max-width: 74ch; }

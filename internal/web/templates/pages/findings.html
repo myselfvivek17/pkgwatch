@@ -1,0 +1,82 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">Findings triage</h1>
+
+  {{with .Data}}
+  <form class="pw-filters" method="get" action="/findings">
+    <label class="pw-filter">
+      <span>severity</span>
+      <select name="tier" onchange="this.form.submit()">
+        {{range .TierOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <label class="pw-filter">
+      <span>show</span>
+      <select name="fix" onchange="this.form.submit()">
+        {{range .FixOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <noscript><button type="submit">apply</button></noscript>
+  </form>
+
+  {{if .Rows}}
+    <table class="pw-table">
+      <thead>
+        <tr>
+          <th>severity</th><th class="pw-num">score</th><th class="pw-num">cvss</th>
+          <th>fix</th><th>package</th><th>advisory</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Rows}}
+        <tr{{if .Fixable}} class="pw-fixable"{{end}}>
+          <td>{{template "severity-badge" .Badge}}</td>
+          <td class="pw-num pw-mono{{if .Promoted}} pw-promoted{{end}}">{{.Score}}</td>
+          <td class="pw-num pw-mono pw-dim">{{.CVSS}}</td>
+          <td class="pw-mono">{{if .Fixable}}<span class="pw-fix">{{.Fix}}</span>{{else}}<span class="pw-dim">{{.Fix}}</span>{{end}}</td>
+          <td class="pw-mono pw-wrap">{{.PURL}}{{if .Summary}}<div class="pw-dim pw-summary">{{.Summary}}</div>{{end}}</td>
+          <td class="pw-mono pw-dim">{{.Advisory}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  {{else}}
+    <div class="pw-card">
+      {{if and .FixableOnly .BundleMissing}}
+        <p class="pw-muted">
+          Cannot tell what is fixable: no advisory bundle is installed. Open findings are still
+          recorded — clear the filter to see them.
+        </p>
+      {{else}}
+        <p class="pw-muted">Nothing matches this filter.</p>
+      {{end}}
+    </div>
+  {{end}}
+
+  <div class="pw-notes">
+    {{if and .Rows (not .FixableOnly)}}
+      <p class="pw-muted">
+        {{.Fixable}} of {{len .Rows}} shown have a published fix. That is not the same as what scores
+        highest: a package can carry a dozen unpatched critical advisories while already being at the
+        newest version its distribution ships.
+      </p>
+    {{end}}
+    {{if .Truncated}}
+      <p class="pw-muted">Showing the worst {{.Limit}} — there are more.</p>
+    {{end}}
+    {{if .Promoted}}
+      <p class="pw-muted">
+        {{.Promoted}} score above their CVSS: a globally installed package is on your PATH, and one
+        with install scripts already ran code. Severity follows score, not CVSS.
+      </p>
+    {{end}}
+    {{if .BundleMissing}}
+      <p class="pw-muted">
+        No advisory bundle is attached, so summaries, CVSS and fix versions are unavailable. These
+        findings are recorded facts; the missing columns are unknown, not empty.
+      </p>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}

@@ -40,7 +40,7 @@ func findingsCmd() *cobra.Command {
 			}
 			defer st.Close()
 
-			findings, err := st.Repo.OpenFindings(st.BundleAttached, limit, fixableOnly)
+			findings, err := st.Repo.OpenFindings(st.BundleAttached, repo.FindingFilter{Limit: limit, FixableOnly: fixableOnly})
 			if err != nil {
 				return err
 			}
