@@ -44,7 +44,7 @@ func findingsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			printFindings(cmd.OutOrStdout(), findings, st.BundleAttached)
+			printFindings(cmd.OutOrStdout(), findings, st.BundleAttached, limit, fixableOnly)
 			return nil
 		},
 	}
@@ -55,8 +55,17 @@ func findingsCmd() *cobra.Command {
 	return cmd
 }
 
-func printFindings(out io.Writer, findings []repo.Finding, bundleAttached bool) {
+func printFindings(out io.Writer, findings []repo.Finding, bundleAttached bool, limit int, fixableOnly bool) {
 	if len(findings) == 0 {
+		// Without a bundle nothing is known about fixes, so --fixable returns
+		// nothing — which is not the same as there being nothing to fix, and
+		// "no open findings" alone would say the opposite on a machine with
+		// hundreds of them.
+		if fixableOnly && !bundleAttached {
+			fmt.Fprintln(out, "cannot tell what is fixable: no advisory bundle is installed.")
+			fmt.Fprintln(out, "Open findings are still recorded — see them with `pkgwatch findings`.")
+			return
+		}
 		fmt.Fprintln(out, "no open findings.")
 		if !bundleAttached {
 			fmt.Fprintln(out, "\nNote: no advisory bundle is installed, so nothing has been matched.")
@@ -102,6 +111,14 @@ func printFindings(out io.Writer, findings []repo.Finding, bundleAttached bool) 
 	// line would only ever read "N of N".
 	if fixable < len(findings) {
 		fmt.Fprintf(out, "\n%d of %d shown have a fix available.\n", fixable, len(findings))
+	}
+
+	// A full page is indistinguishable from the whole list, and that footer was
+	// the only thing hinting at a window before --fixable silenced it. Say it
+	// outright: a truncated list that does not admit to being truncated reads as
+	// the complete picture.
+	if len(findings) == limit {
+		fmt.Fprintf(out, "\nShowing the worst %d — there are more. Raise --limit to see them.\n", limit)
 	}
 
 	// Two numbers that routinely disagree need saying out loud once, or the
