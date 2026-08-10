@@ -98,12 +98,28 @@ func (c Container) short() string {
 }
 
 // label is what the dashboard shows to say which container a finding is in.
+//
+// It is also the install path rows are matched on, which is why the digest is
+// stripped. Docker reports an image as repo:tag@sha256:… once it has been
+// pulled by digest, and that digest changes on every image update — so keeping
+// it would change the install path of a container that had not moved, retiring
+// its entire package list and re-adding it under a new path. That is the same
+// mistake as building identity out of an ecosystem string that can be revised:
+// anything in a key has to be something that does not legitimately change.
 func (c Container) label() string {
 	name := c.short()
 	if len(c.Names) > 0 {
 		name = strings.TrimPrefix(c.Names[0], "/")
 	}
-	return "container:" + name + " (" + c.Image + ")"
+	return "container:" + name + " (" + imageWithoutDigest(c.Image) + ")"
+}
+
+// imageWithoutDigest drops a pinned digest, keeping repo and tag.
+func imageWithoutDigest(image string) string {
+	if at := strings.Index(image, "@"); at >= 0 {
+		return image[:at]
+	}
+	return image
 }
 
 // DockerClient talks to the Docker engine over its local socket.

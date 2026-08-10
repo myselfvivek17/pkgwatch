@@ -157,3 +157,22 @@ func TestAgainstRealDocker(t *testing.T) {
 		t.Error("no container yielded any packages; a Debian or Alpine container should")
 	}
 }
+
+// The label is the install path rows are matched on, so anything in it that
+// legitimately changes will retire a container's whole package list and re-add
+// it. A pinned digest changes on every image update.
+func TestLabelDropsPinnedDigest(t *testing.T) {
+	container := Container{
+		Names: []string{"/immich_postgres"},
+		Image: "ghcr.io/immich-app/postgres:14-vectorchord0.4.3@sha256:bcf63357191b76a916ae5eb93464",
+	}
+	want := "container:immich_postgres (ghcr.io/immich-app/postgres:14-vectorchord0.4.3)"
+	if got := container.label(); got != want {
+		t.Errorf("label() = %q, want %q", got, want)
+	}
+
+	plain := Container{Names: []string{"/homeassistant"}, Image: "ghcr.io/home-assistant/home-assistant:stable"}
+	if got := plain.label(); got != "container:homeassistant (ghcr.io/home-assistant/home-assistant:stable)" {
+		t.Errorf("label() = %q — an image without a digest must be untouched", got)
+	}
+}
