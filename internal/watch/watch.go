@@ -28,6 +28,9 @@ type Report struct {
 	// the package is installed once more.
 	Reopened int
 
+	// Unignored counts findings whose ignore window expired on this pass.
+	Unignored int
+
 	// Baseline is set on the first pass a machine ever runs. Pre-existing
 	// low and medium findings are recorded acknowledged rather than announced.
 	Baseline     bool
@@ -142,6 +145,13 @@ func Run(handle *sql.DB, store repo.Agent, bundle repo.BundleInfo, now time.Time
 	// silently absorbed it, since the finding row already exists in the fixed
 	// state. Ordering matters only in that both run every pass.
 	if report.Reopened, err = store.ReopenFindingsForPresentPackages(); err != nil {
+		return report, err
+	}
+
+	// An ignore with an expiry that nothing enforces is a permanent ignore with
+	// extra steps. This runs on every pass so "hide it for a week" comes back
+	// after a week without anyone having to remember.
+	if report.Unignored, err = store.ExpireIgnores(now); err != nil {
 		return report, err
 	}
 	return report, nil

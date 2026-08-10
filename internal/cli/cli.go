@@ -77,7 +77,7 @@ func Root() *cobra.Command {
 		publishCmd(),
 
 		findingsCmd(),
-		stub("ack <purl> <advisory-id>", "Acknowledge a finding", "M3", cobra.ExactArgs(2)),
+		ackCmd(),
 		ignoreCmd(),
 		stub("quarantine <purl>", "Quarantine an installed package", "M6", cobra.ExactArgs(1)),
 		stub("restore <quarantine-id>", "Restore a quarantined package", "M6", cobra.ExactArgs(1)),
@@ -137,20 +137,6 @@ func hubCmd() *cobra.Command {
 	)
 
 	cmd.AddCommand(stub("pair-code", "Generate a single-use pairing code", "M5", cobra.NoArgs), devices)
-	return cmd
-}
-
-// ignoreCmd exists separately because --days is mandatory (§10): an ignore with
-// no expiry is how a finding gets silently forgotten.
-func ignoreCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "ignore <purl> <advisory-id>",
-		Short: "Ignore a finding for a fixed number of days",
-		Args:  cobra.ExactArgs(2),
-		RunE:  func(*cobra.Command, []string) error { return notImplemented("M3") },
-	}
-	cmd.Flags().Int("days", 0, "days to ignore this finding for (required)")
-	cmd.MarkFlagRequired("days")
 	return cmd
 }
 
