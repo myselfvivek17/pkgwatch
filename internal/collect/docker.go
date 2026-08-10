@@ -247,9 +247,23 @@ func (b connBody) Close() error {
 	return err
 }
 
-// Containers lists what is running.
+// Containers lists every container that exists, running or not.
+//
+// all=1 matters. Docker's default lists only running containers, and a
+// container that exists but is stopped still has its filesystem on disk with
+// every vulnerable package in it. Listing only running ones meant a stopped
+// container's rows stopped being seen, so they were retired, so every finding
+// against them closed — on a real machine two stopped immich containers took
+// 322 packages and their advisories with them, silently. Stopping a container
+// is not patching it; starting it again brings the CVEs back.
+//
+// This costs nothing: the archive endpoint reads a stopped container's files
+// without starting it, exactly as it does a running one. That is why the plan
+// puts non-running *images* behind a flag — those need a container created
+// first, which mutates Docker state — while containers that already exist need
+// no such thing.
 func (c *DockerClient) Containers() ([]Container, error) {
-	resp, err := c.get("/containers/json")
+	resp, err := c.get("/containers/json?all=1")
 	if err != nil {
 		return nil, err
 	}
