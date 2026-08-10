@@ -108,49 +108,82 @@ func (a Agent) ResolveFindingsForGonePackages(at time.Time) (int, error) {
 // attached says whether the advisory database is available. Without it the
 // findings are still listed — they are recorded facts — but with no summary,
 // because inventing one would be worse than an empty column.
-func (a Agent) OpenFindings(attached bool, limit int) ([]Finding, error) {
-	query := `SELECT f.purl, f.advisory_id, f.score, f.tier, f.state, f.detected_at, '', NULL, ''
-		FROM findings f
-		WHERE f.state NOT IN ('ignored', 'fixed')
-		ORDER BY f.score DESC, f.purl LIMIT ?`
-	if attached {
-		// The advisory's own CVSS comes along for the ride. The stored score is
-		// contextual — install scope and lifecycle scripts multiply it (§5.2) —
-		// so a finding can sit two tiers above what the advisory itself rates,
-		// and showing only one of the two numbers makes that look like an error.
-		//
-		// MAX rather than a join: one advisory id covers several packages and
-		// would otherwise multiply the result set.
-		// FixedIn is looked up from the bundle rather than stored on the finding.
-		// Whether a fix exists changes when the advisory is updated, not when the
-		// finding was detected — freezing it at detection time would keep saying
-		// "no fix" for something patched last week.
-		//
-		// The join goes through packages because a finding is keyed by purl and
-		// the advisory rows are keyed by ecosystem and package name.
-		query = `SELECT f.purl, f.advisory_id, f.score, f.tier, f.state, f.detected_at,
-			COALESCE(t.summary, ''),
-			(SELECT MAX(a.severity_cvss) FROM adv.advisories a WHERE a.id = f.advisory_id),
-			COALESCE((
-				SELECT MIN(r.fixed) FROM adv.advisories a
-				JOIN adv.advisory_ranges r ON r.advisory_id = a.rowid
-				WHERE a.id = f.advisory_id
-				  AND a.ecosystem = p.ecosystem
-				  AND a.package_name = p.name
-				  AND a.kind <> 'malware'
-				  AND r.fixed IS NOT NULL
-			), '')
+//
+// fixableOnly restricts to findings with a published fix. It has to happen in
+// the query rather than over the returned slice: filtering afterwards would
+// mean "the fixable ones among the worst N", which reads as "the fixable ones"
+// and is not the same list — a machine can have a hundred unfixable criticals
+// burying every finding you could act on.
+func (a Agent) OpenFindings(attached bool, limit int, fixableOnly bool) ([]Finding, error) {
+	if !attached {
+		if fixableOnly {
+			// Whether a fix exists is only knowable from the bundle. Returning
+			// everything here would claim each one is unfixable.
+			return nil, nil
+		}
+		rows, err := a.DB.Query(`SELECT f.purl, f.advisory_id, f.score, f.tier, f.state,
+			f.detected_at, '', NULL, ''
+			FROM findings f
+			WHERE f.state NOT IN ('ignored', 'fixed')
+			ORDER BY f.score DESC, f.purl LIMIT ?`, limit)
+		if err != nil {
+			return nil, err
+		}
+		return scanFindings(rows)
+	}
+
+	// The advisory's own CVSS comes along for the ride. The stored score is
+	// contextual — install scope and lifecycle scripts multiply it (§5.2) —
+	// so a finding can sit two tiers above what the advisory itself rates,
+	// and showing only one of the two numbers makes that look like an error.
+	//
+	// MAX rather than a join: one advisory id covers several packages and
+	// would otherwise multiply the result set.
+	//
+	// FixedIn is looked up from the bundle rather than stored on the finding.
+	// Whether a fix exists changes when the advisory is updated, not when the
+	// finding was detected — freezing it at detection time would keep saying
+	// "no fix" for something patched last week.
+	//
+	// The join goes through packages because a finding is keyed by purl and
+	// the advisory rows are keyed by ecosystem and package name.
+	query := `WITH open AS (
+			SELECT f.purl AS purl, f.advisory_id AS advisory_id, f.score AS score,
+				f.tier AS tier, f.state AS state, f.detected_at AS detected_at,
+				COALESCE(t.summary, '') AS summary,
+				(SELECT MAX(a.severity_cvss) FROM adv.advisories a
+				 WHERE a.id = f.advisory_id) AS base_cvss,
+				COALESCE((
+					SELECT MIN(r.fixed) FROM adv.advisories a
+					JOIN adv.advisory_ranges r ON r.advisory_id = a.rowid
+					WHERE a.id = f.advisory_id
+					  AND a.ecosystem = p.ecosystem
+					  AND a.package_name = p.name
+					  AND a.kind <> 'malware'
+					  AND r.fixed IS NOT NULL
+				), '') AS fixed_in
 			FROM findings f
 			LEFT JOIN packages p ON p.purl = f.purl
 			LEFT JOIN adv.advisory_text t ON t.id = f.advisory_id
 			WHERE f.state NOT IN ('ignored', 'fixed')
-			ORDER BY f.score DESC, f.purl LIMIT ?`
-	}
+		)
+		SELECT purl, advisory_id, score, tier, state, detected_at, summary, base_cvss, fixed_in
+		FROM open
+		WHERE (? = 0 OR fixed_in <> '')
+		ORDER BY score DESC, purl LIMIT ?`
 
-	rows, err := a.DB.Query(query, limit)
+	only := 0
+	if fixableOnly {
+		only = 1
+	}
+	rows, err := a.DB.Query(query, only, limit)
 	if err != nil {
 		return nil, err
 	}
+	return scanFindings(rows)
+}
+
+func scanFindings(rows *sql.Rows) ([]Finding, error) {
 	defer rows.Close()
 
 	var out []Finding

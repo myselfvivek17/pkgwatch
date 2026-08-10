@@ -40,18 +40,9 @@ func findingsCmd() *cobra.Command {
 			}
 			defer st.Close()
 
-			findings, err := st.Repo.OpenFindings(st.BundleAttached, limit)
+			findings, err := st.Repo.OpenFindings(st.BundleAttached, limit, fixableOnly)
 			if err != nil {
 				return err
-			}
-			if fixableOnly {
-				kept := findings[:0]
-				for _, finding := range findings {
-					if finding.FixedIn != "" {
-						kept = append(kept, finding)
-					}
-				}
-				findings = kept
 			}
 			printFindings(cmd.OutOrStdout(), findings, st.BundleAttached)
 			return nil
@@ -106,7 +97,12 @@ func printFindings(out io.Writer, findings []repo.Finding, bundleAttached bool) 
 	// list. The highest-scoring finding on a real machine turned out to be
 	// nineteen unpatched snapd advisories on a package already at the latest
 	// version its distribution ships — correct, and useless to act on.
-	fmt.Fprintf(out, "\n%d of %d shown have a fix available.\n", fixable, len(findings))
+	//
+	// Silent under --fixable, where every row is fixable by construction and the
+	// line would only ever read "N of N".
+	if fixable < len(findings) {
+		fmt.Fprintf(out, "\n%d of %d shown have a fix available.\n", fixable, len(findings))
+	}
 
 	// Two numbers that routinely disagree need saying out loud once, or the
 	// table reads as a bug. SCORE is the advisory's CVSS multiplied by where the

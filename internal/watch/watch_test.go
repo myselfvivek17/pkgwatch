@@ -88,7 +88,7 @@ func TestWatchFindsAffectedInstalledPackage(t *testing.T) {
 		t.Fatalf("New = %d, want 1 — only 4.17.20 is affected", report.New)
 	}
 
-	findings, err := store.OpenFindings(true, 10)
+	findings, err := store.OpenFindings(true, 10, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestBaselineFilesLowAndMediumQuietly(t *testing.T) {
 	}
 
 	// Filed, not hidden: it must still be listed.
-	open, err := store.OpenFindings(true, 10)
+	open, err := store.OpenFindings(true, 10, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestBaselineStillAnnouncesMalware(t *testing.T) {
 		t.Errorf("malware was filed quietly on the baseline pass")
 	}
 
-	open, err := store.OpenFindings(true, 10)
+	open, err := store.OpenFindings(true, 10, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,12 +214,46 @@ func TestUninstallClosesFinding(t *testing.T) {
 	if report.Resolved != 1 {
 		t.Errorf("Resolved = %d, want 1", report.Resolved)
 	}
-	open, err := store.OpenFindings(true, 10)
+	open, err := store.OpenFindings(true, 10, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(open) != 0 {
 		t.Errorf("findings still open for an uninstalled package: %+v", open)
+	}
+}
+
+// --fixable has to filter before the limit, not after. Malware outscores the
+// lodash CVE and sorts above it, so a post-limit filter over the worst N would
+// return nothing here — the one finding that can actually be acted on, hidden
+// behind a higher-scoring one that cannot.
+func TestFixableFiltersBeforeTheLimit(t *testing.T) {
+	handle, store, info := newWatched(t)
+	installed(store, t,
+		pkgRow("pkg:npm/%40ctrl/tinycolor@4.1.2", "npm", "@ctrl/tinycolor", "4.1.2", match.ScopeProject),
+		pkgRow("pkg:npm/lodash@4.17.20", "npm", "lodash", "4.17.20", match.ScopeProject))
+
+	if _, err := watch.Run(handle, store, info, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	worst, err := store.OpenFindings(true, 1, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(worst) != 1 || worst[0].PURL != "pkg:npm/%40ctrl/tinycolor@4.1.2" {
+		t.Fatalf("expected malware to sort first, got %+v", worst)
+	}
+
+	fixable, err := store.OpenFindings(true, 1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fixable) != 1 || fixable[0].PURL != "pkg:npm/lodash@4.17.20" {
+		t.Fatalf("fixable = %+v, want the lodash finding", fixable)
+	}
+	if fixable[0].FixedIn != "4.17.21" {
+		t.Errorf("FixedIn = %q, want 4.17.21", fixable[0].FixedIn)
 	}
 }
 
