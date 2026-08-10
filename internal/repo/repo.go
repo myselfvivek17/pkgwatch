@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/myselfvivek17/pkgwatch/internal/match"
 )
 
 type Agent struct{ DB *sql.DB }
@@ -97,18 +96,15 @@ func (b BundleInfo) Covers(ecosystem string) bool {
 	return false
 }
 
-// CoveredBases collapses the coverage list to distinct ecosystem names, for
-// display. Six Debian and Alpine releases are a long line and a short fact.
-func (b BundleInfo) CoveredBases() []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, covered := range b.Ecosystems {
-		base := match.BaseEcosystem(covered)
-		if !seen[base] {
-			seen[base] = true
-			out = append(out, base)
-		}
-	}
+// CoveredScopes is the coverage list in a stable order, for display.
+//
+// Deliberately not collapsed to base ecosystem names. Coverage is per release,
+// so a bundle can hold Ubuntu:24.04:LTS and not Ubuntu:22.04:LTS — and a status
+// line reading "covers Ubuntu" next to a scan reading "no advisories for
+// Ubuntu:22.04:LTS" is a tool contradicting itself, where the reassuring half
+// is the one that gets believed.
+func (b BundleInfo) CoveredScopes() []string {
+	out := append([]string(nil), b.Ecosystems...)
 	sort.Strings(out)
 	return out
 }

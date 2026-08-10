@@ -162,9 +162,18 @@ func TestCoverageIsMatchedPerRelease(t *testing.T) {
 		}
 	}
 
-	bases := info.CoveredBases()
-	if len(bases) != 4 {
-		t.Errorf("CoveredBases() = %v, want one entry per distinct ecosystem", bases)
+	// Displayed per release, not collapsed to base names. "covers Ubuntu"
+	// alongside a scan saying "no advisories for Ubuntu:22.04:LTS" is the tool
+	// contradicting itself, and the reassuring half is the one believed.
+	scopes := info.CoveredScopes()
+	want := []string{"Alpine:v3.24", "Debian:12", "Ubuntu:24.04:LTS", "npm"}
+	if len(scopes) != len(want) {
+		t.Fatalf("CoveredScopes() = %v, want %v", scopes, want)
+	}
+	for i, scope := range want {
+		if scopes[i] != scope {
+			t.Errorf("CoveredScopes()[%d] = %q, want %q", i, scopes[i], scope)
+		}
 	}
 }
 

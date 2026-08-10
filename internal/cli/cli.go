@@ -204,7 +204,7 @@ func printStatus(cmd *cobra.Command, cfg config.Config) error {
 			// Collapsed to distinct ecosystems. Six Debian and Alpine releases are
 			// a long line and a short fact; the full per-release list is what the
 			// matching uses, not what a person needs to read.
-			fmt.Fprintf(w, "covers\t%s\n", strings.Join(st.Bundle.CoveredBases(), ", "))
+			fmt.Fprintf(w, "covers\t%s\n", strings.Join(st.Bundle.CoveredScopes(), ", "))
 			for _, gated := range []string{match.EcosystemNPM, match.EcosystemPyPI} {
 				if !st.Bundle.Covers(gated) {
 					fmt.Fprintf(w, "\tWARNING: %s installs are gated but this bundle has no %s advisories\n",

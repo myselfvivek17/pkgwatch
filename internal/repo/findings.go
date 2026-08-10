@@ -118,11 +118,17 @@ func (a Agent) ResolveFindingsForGonePackages(at time.Time) (int, error) {
 //
 // Ignored stays ignored — that was a decision about the package, not about
 // whether it happened to be installed this week.
+//
+// Low and medium come back acknowledged rather than announced, matching what a
+// baseline pass would have done with them. Otherwise stopping and starting a
+// container promotes every quiet finding it holds into an announcement, which
+// is the "hundreds of alerts at once" failure arriving by a side door.
 func (a Agent) ReopenFindingsForPresentPackages() (int, error) {
-	result, err := a.DB.Exec(`UPDATE findings SET state = ?
+	result, err := a.DB.Exec(`UPDATE findings
+		SET state = CASE WHEN tier IN ('critical', 'high') THEN ? ELSE ? END
 		WHERE state = ?
 		  AND purl IN (SELECT purl FROM packages WHERE gone_at IS NULL)`,
-		StateNew, StateFixed)
+		StateNew, StateAcknowledged, StateFixed)
 	if err != nil {
 		return 0, err
 	}

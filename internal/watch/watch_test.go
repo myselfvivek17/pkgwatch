@@ -349,3 +349,70 @@ func TestReopenLeavesIgnoredAlone(t *testing.T) {
 		t.Errorf("Reopened = %d, want 0 — ignored stays ignored", report.Reopened)
 	}
 }
+
+// Reopening must not promote a finding that was deliberately filed quietly.
+// Otherwise stopping and starting a container turns every low and medium
+// finding it holds into an announcement — the "hundreds of alerts at once"
+// failure that baseline mode exists to prevent, arriving by a side door.
+func TestReopenKeepsQuietFindingsQuiet(t *testing.T) {
+	handle, store, info := newWatched(t)
+	stale := repo.PackageRow{
+		PURL: "pkg:npm/lodash@4.17.20", Ecosystem: "npm", Name: "lodash",
+		Version: "4.17.20", Scope: match.ScopeProject, InstallDir: "/old/lodash",
+	}
+	installed(store, t, stale)
+	// Stale enough to score medium, so the baseline pass files it acknowledged.
+	if _, err := store.DB.Exec("UPDATE packages SET last_seen = ? WHERE purl = ?",
+		time.Now().Add(-200*24*time.Hour).Unix(), stale.PURL); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := watch.Run(handle, store, info, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Acknowledged != 1 {
+		t.Fatalf("Acknowledged = %d, want the medium finding filed quietly", report.Acknowledged)
+	}
+
+	// Gone, then back — a stopped container starting again.
+	if err := store.MarkGone([]string{stale.PURL}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := watch.Run(handle, store, info, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	installed(store, t, stale)
+	if _, err := watch.Run(handle, store, info, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	open, err := store.OpenFindings(true, 10, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 {
+		t.Fatalf("findings = %+v, want one", open)
+	}
+	if open[0].State != repo.StateAcknowledged {
+		t.Errorf("State = %q, want acknowledged — a restart is not news", open[0].State)
+	}
+}
+
+// Reopening runs on every pass. If it flapped, the same findings would reopen
+// forever and notify every six hours.
+func TestReopenIsIdempotent(t *testing.T) {
+	handle, store, info := newWatched(t)
+	lodash := pkgRow("pkg:npm/lodash@4.17.20", "npm", "lodash", "4.17.20", match.ScopeProject)
+	installed(store, t, lodash)
+
+	for i := 0; i < 3; i++ {
+		report, err := watch.Run(handle, store, info, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if report.Reopened != 0 {
+			t.Fatalf("pass %d reopened %d — nothing was ever closed", i, report.Reopened)
+		}
+	}
+}
