@@ -153,6 +153,9 @@ func reportWatch(out io.Writer, report watch.Report) {
 	if report.Resolved > 0 {
 		fmt.Fprintf(out, "%d finding(s) closed — the package is no longer installed\n", report.Resolved)
 	}
+	if report.Reopened > 0 {
+		fmt.Fprintf(out, "%d finding(s) reopened — the package is installed again\n", report.Reopened)
+	}
 	if len(report.Uncovered) > 0 {
 		fmt.Fprintf(out, "NOT EXAMINED: the bundle carries no advisories for %s — "+
 			"those packages are unknown, not clean\n", strings.Join(report.Uncovered, ", "))

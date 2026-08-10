@@ -102,6 +102,33 @@ func (a Agent) ResolveFindingsForGonePackages(at time.Time) (int, error) {
 	return rowsAffected(result), nil
 }
 
+// ReopenFindingsForPresentPackages undoes a close when the package comes back.
+//
+// A finding is only ever marked fixed here because its package stopped being
+// installed, so a package that is present again is not fixed. Without this the
+// close is permanent: RecordFindings is INSERT OR IGNORE against (purl,
+// advisory_id), so a row that already exists in the fixed state absorbs every
+// later attempt to record the same finding and the vulnerability never comes
+// back into view.
+//
+// This is not hypothetical. Two stopped containers had their packages retired
+// and 322 findings closed; when the collector started reading stopped
+// containers the packages returned and the scan reported zero new findings,
+// because every one of them was silently absorbed.
+//
+// Ignored stays ignored — that was a decision about the package, not about
+// whether it happened to be installed this week.
+func (a Agent) ReopenFindingsForPresentPackages() (int, error) {
+	result, err := a.DB.Exec(`UPDATE findings SET state = ?
+		WHERE state = ?
+		  AND purl IN (SELECT purl FROM packages WHERE gone_at IS NULL)`,
+		StateNew, StateFixed)
+	if err != nil {
+		return 0, err
+	}
+	return rowsAffected(result), nil
+}
+
 // OpenFindings returns findings that still want attention, worst first, with
 // the advisory text joined in from the attached bundle.
 //

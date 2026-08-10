@@ -283,3 +283,69 @@ func TestWatchWithoutBundleIsAnError(t *testing.T) {
 		t.Error("matching with no bundle must fail loudly, not report a clean machine")
 	}
 }
+
+// Closing a finding must not be permanent. RecordFindings is INSERT OR IGNORE,
+// so a row left in the fixed state absorbs every later attempt to record the
+// same finding — a package that comes back would never be reported again. Two
+// stopped containers hid 322 findings this way.
+func TestReturningPackageReopensFinding(t *testing.T) {
+	handle, store, info := newWatched(t)
+	lodash := pkgRow("pkg:npm/lodash@4.17.20", "npm", "lodash", "4.17.20", match.ScopeProject)
+	installed(store, t, lodash)
+
+	if _, err := watch.Run(handle, store, info, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkGone([]string{lodash.PURL}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := watch.Run(handle, store, info, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	// The package is seen again — a stopped container started, or a reinstall.
+	installed(store, t, lodash)
+	report, err := watch.Run(handle, store, info, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.New != 0 {
+		t.Errorf("New = %d — the finding row already exists, it is reopened not re-added", report.New)
+	}
+	if report.Reopened != 1 {
+		t.Errorf("Reopened = %d, want 1", report.Reopened)
+	}
+
+	open, err := store.OpenFindings(true, 10, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].PURL != lodash.PURL {
+		t.Fatalf("findings = %+v, want the lodash finding open again", open)
+	}
+	if open[0].State != repo.StateNew {
+		t.Errorf("State = %q, want new — it is news again", open[0].State)
+	}
+}
+
+// An ignored finding was a decision about the package, not about whether it
+// happened to be installed that week.
+func TestReopenLeavesIgnoredAlone(t *testing.T) {
+	handle, store, info := newWatched(t)
+	lodash := pkgRow("pkg:npm/lodash@4.17.20", "npm", "lodash", "4.17.20", match.ScopeProject)
+	installed(store, t, lodash)
+	if _, err := watch.Run(handle, store, info, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handle.Exec("UPDATE findings SET state = ?", repo.StateIgnored); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := watch.Run(handle, store, info, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Reopened != 0 {
+		t.Errorf("Reopened = %d, want 0 — ignored stays ignored", report.Reopened)
+	}
+}

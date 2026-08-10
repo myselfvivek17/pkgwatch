@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/myselfvivek17/pkgwatch/internal/match"
@@ -22,6 +23,10 @@ type Report struct {
 	Examined int
 	New      int
 	Resolved int
+
+	// Reopened counts findings that had been closed and are open again because
+	// the package is installed once more.
+	Reopened int
 
 	// Baseline is set on the first pass a machine ever runs. Pre-existing
 	// low and medium findings are recorded acknowledged rather than announced.
@@ -66,7 +71,12 @@ func Run(handle *sql.DB, store repo.Agent, bundle repo.BundleInfo, now time.Time
 		if len(bundle.Ecosystems) > 0 && !bundle.Covers(pkg.Ecosystem) {
 			// Zero rows and "we never looked" are the same query result and
 			// opposite answers. Count it, do not score it.
-			uncovered[match.BaseEcosystem(pkg.Ecosystem)] = true
+			//
+			// Named in full, not collapsed to the base. Coverage is per release:
+			// a bundle can carry Ubuntu:24.04:LTS and not Ubuntu:22.04:LTS, and
+			// saying "no advisories for Ubuntu" while 1,830 Ubuntu packages were
+			// just examined is false in the direction that gets ignored.
+			uncovered[pkg.Ecosystem] = true
 			continue
 		}
 		report.Examined++
@@ -104,6 +114,7 @@ func Run(handle *sql.DB, store repo.Agent, bundle repo.BundleInfo, now time.Time
 	for ecosystem := range uncovered {
 		report.Uncovered = append(report.Uncovered, ecosystem)
 	}
+	sort.Strings(report.Uncovered)
 
 	added, err := store.RecordFindings(findings, now)
 	if err != nil {
@@ -118,6 +129,13 @@ func Run(handle *sql.DB, store repo.Agent, bundle repo.BundleInfo, now time.Time
 	}
 
 	if report.Resolved, err = store.ResolveFindingsForGonePackages(now); err != nil {
+		return report, err
+	}
+	// After closing, reopen: a package can come back — a stopped container
+	// started again, a package reinstalled — and RecordFindings above would have
+	// silently absorbed it, since the finding row already exists in the fixed
+	// state. Ordering matters only in that both run every pass.
+	if report.Reopened, err = store.ReopenFindingsForPresentPackages(); err != nil {
 		return report, err
 	}
 	return report, nil
