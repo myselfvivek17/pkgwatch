@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
 )
 
 type Agent struct{ DB *sql.DB }
