@@ -1,0 +1,27 @@
+{{define "timeline-row"}}
+{{/*
+  One event. Routine rows (scan, feed_sync, package_filtered) render dimmed and
+  tighter than actionable ones — that hierarchy is the page doing triage, and
+  flattening it would put a six-hourly scan at the same weight as a block.
+
+  Rows with detail are expandable; rows without do not pretend to be. A chevron
+  that opens onto nothing is worse than no chevron.
+*/}}
+<details class="pw-row{{if .Routine}} pw-row-routine{{end}}{{if .Alarming}} pw-row-alarming{{end}}"
+         {{if not .HasDetail}}data-flat="1"{{end}}>
+  <summary class="pw-row-head">
+    <span class="pw-row-time pw-mono">{{.Time}}</span>
+    <span class="pw-row-kind">{{.KindLabel}}</span>
+    <span class="pw-row-summary">{{.Summary}}</span>
+    {{if .Tier}}{{template "severity-badge" .Badge}}{{end}}
+  </summary>
+  {{if .HasDetail}}
+  <div class="pw-row-detail">
+    <dl class="pw-kv">
+      {{range .Fields}}<dt>{{.Key}}</dt><dd class="pw-mono">{{.Value}}</dd>{{end}}
+    </dl>
+    {{if .SessionHref}}<a class="pw-link" href="{{.SessionHref}}">open the block report →</a>{{end}}
+  </div>
+  {{end}}
+</details>
+{{end}}

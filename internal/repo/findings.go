@@ -73,6 +73,23 @@ func (a Agent) RecordFindings(findings []Finding, at time.Time) (int, error) {
 	return added, tx.Commit()
 }
 
+// FindingFirstSeen returns when a finding was first detected, which is what
+// distinguishes one this pass just inserted from one INSERT OR IGNORE left
+// alone. The zero time means there is no such finding.
+func (a Agent) FindingFirstSeen(purl, advisoryID string) (time.Time, error) {
+	var detectedAt int64
+	err := a.DB.QueryRow(
+		"SELECT detected_at FROM findings WHERE purl = ? AND advisory_id = ?",
+		purl, advisoryID).Scan(&detectedAt)
+	if err == sql.ErrNoRows {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(detectedAt, 0), nil
+}
+
 // HasFindings reports whether anything has ever been recorded.
 //
 // This is what decides a baseline run. A machine seeing its inventory matched

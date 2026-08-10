@@ -122,6 +122,12 @@ func Run(handle *sql.DB, store repo.Agent, bundle repo.BundleInfo, now time.Time
 	}
 	report.New = added
 
+	// A timeline row per announced finding, and none for the quiet ones. The
+	// state was already decided above by stateFor, so reusing it keeps the
+	// timeline and the notification telling the same story — a baseline pass
+	// that files 900 findings quietly must not then post 900 timeline rows.
+	recordFindingEvents(store, findings, now)
+
 	for _, finding := range findings {
 		if finding.State == repo.StateAcknowledged {
 			report.Acknowledged++
@@ -139,6 +145,37 @@ func Run(handle *sql.DB, store repo.Agent, bundle repo.BundleInfo, now time.Time
 		return report, err
 	}
 	return report, nil
+}
+
+// recordFindingEvents posts one timeline row per announced finding.
+//
+// Only findings RecordFindings actually inserted deserve a row, but it reports
+// a count rather than which ones — so this re-reads state from the finding it
+// just tried to record. A duplicate insert leaves the stored state alone, and
+// the event would be a second announcement of old news; checking the row's
+// detected_at against this pass is what tells them apart.
+//
+// Event recording never fails the pass. The finding is already stored, and
+// losing a timeline row is not worth discarding a scan over.
+func recordFindingEvents(store repo.Agent, findings []repo.Finding, now time.Time) {
+	for _, finding := range findings {
+		if finding.State != repo.StateNew {
+			continue
+		}
+		// Compared in whole seconds: detected_at is stored as a Unix timestamp,
+		// so an equality test against a time.Time carrying nanoseconds would
+		// never match and no finding would ever get a timeline row.
+		fresh, err := store.FindingFirstSeen(finding.PURL, finding.AdvisoryID)
+		if err != nil || fresh.Unix() != now.Unix() {
+			continue
+		}
+		if err := store.RecordEvent(repo.EventFindingNew, finding.Tier,
+			finding.PURL, finding.AdvisoryID, map[string]any{
+				"score": finding.Score,
+			}, now); err != nil {
+			slog.Warn("watch: could not record finding event", "purl", finding.PURL, "error", err)
+		}
+	}
 }
 
 // stateFor decides whether a finding is announced or filed quietly.

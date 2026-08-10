@@ -69,7 +69,19 @@ func syncCmd() *cobra.Command {
 				return err
 			}
 			defer st.Close()
-			return runWatch(cmd, st, time.Now())
+
+			// Routine, dimmed on the timeline, and load-bearing: a bundle that
+			// stopped arriving is a watchdog matching against a frozen view of
+			// the world, which looks exactly like a quiet week.
+			now := time.Now()
+			if err := st.Repo.RecordEvent(repo.EventFeedSync, "", "", "", map[string]any{
+				"bundle":  st.Bundle.Version,
+				"records": fmt.Sprint(st.Bundle.RecordCount),
+				"covers":  strings.Join(st.Bundle.CoveredScopes(), ", "),
+			}, now); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "note: could not record sync event: %v\n", err)
+			}
+			return runWatch(cmd, st, now)
 		},
 	}
 

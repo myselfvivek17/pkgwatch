@@ -8,6 +8,7 @@ package scanner
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -76,6 +77,25 @@ func Run(handle *sql.DB, store repo.Agent, bundleInfo repo.BundleInfo,
 	}
 
 	out.Elapsed = time.Since(started)
+
+	// One routine row per pass. The timeline renders these dimmed, and their
+	// absence is the point: no scan events for two days is what a silently dead
+	// agent looks like, and a page that only ever showed alarms could not
+	// distinguish that from a quiet week.
+	//
+	// Recorded on a best-effort basis — the scan itself succeeded, and losing a
+	// timeline row is not worth reporting it as failed.
+	if err := store.RecordEvent(repo.EventScan, "", "", "", map[string]any{
+		"packages":  fmt.Sprint(len(rows)),
+		"new":       fmt.Sprint(inserted),
+		"gone":      fmt.Sprint(out.Result.Gone),
+		"findings":  fmt.Sprint(out.Watch.New),
+		"elapsed":   out.Elapsed.Round(time.Millisecond).String(),
+		"unmatched": fmt.Sprint(!out.Matched),
+	}, scanAt); err != nil {
+		slog.Warn("scanner: could not record scan event", "error", err)
+	}
+
 	return out, nil
 }
 

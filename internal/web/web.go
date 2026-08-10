@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -45,7 +47,7 @@ func nav(mode Mode, active string) []NavItem {
 	}
 	items := []NavItem{
 		first,
-		{Key: "timeline", Label: "Timeline", Href: "/timeline"},
+		{Key: "timeline", Label: "Timeline", Href: "/timeline", Enabled: true},
 		{Key: "findings", Label: "Findings triage", Href: "/findings"},
 		{Key: "block", Label: "Install block", Href: "/sessions"},
 		{Key: "credentials", Label: "Credential rotation", Href: "/rotate"},
@@ -88,6 +90,20 @@ type Server struct {
 	Paired   bool
 
 	Overview func() (OverviewData, error)
+
+	// Events and OldestEvent back the timeline. They are funcs rather than a
+	// repo handle so the hub can supply fleet events from its own tables
+	// without this package knowing which database it is reading.
+	Events      func(repo.EventFilter) ([]repo.Event, error)
+	OldestEvent func() (time.Time, error)
+
+	// HistoryDays is the retention window, shown so a timeline that stops is
+	// distinguishable from a machine that did nothing.
+	HistoryDays int
+
+	// StreamInterval is how often the live feed polls for new rows. Zero means
+	// the default; tests set it low.
+	StreamInterval time.Duration
 
 	templates map[string]*template.Template
 }
@@ -161,7 +177,7 @@ type badgeRow struct {
 // it surfaces at construction rather than on the first request.
 func New(mode Mode, hostname string) (*Server, error) {
 	s := &Server{Mode: mode, Hostname: hostname, templates: map[string]*template.Template{}}
-	for _, page := range []string{"overview", "design"} {
+	for _, page := range []string{"overview", "design", "timeline"} {
 		tpl, err := template.ParseFS(assets,
 			"templates/layout.html",
 			"templates/partials/*.html",
@@ -181,6 +197,25 @@ func (s *Server) Routes(r chi.Router) {
 	r.Handle("/static/*", http.FileServer(http.FS(assets)))
 	r.Get("/", s.handleOverview)
 	r.Get("/design", s.handleDesign)
+	if s.Events != nil {
+		r.Get("/timeline", s.handleTimeline)
+		r.Get("/events/stream", s.handleStream)
+	}
+}
+
+// renderPartial renders one partial on its own, for the live stream to push
+// pre-rendered HTML instead of JSON the browser would have to template again.
+// Any page's template set carries the partials, so the first one serves.
+func (s *Server) renderPartial(name string, data any) (string, error) {
+	tpl, ok := s.templates["timeline"]
+	if !ok {
+		return "", fmt.Errorf("templates not loaded")
+	}
+	var buf strings.Builder
+	if err := tpl.ExecuteTemplate(&buf, name, data); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,47 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">Timeline</h1>
+
+  {{with .Data}}
+  <form class="pw-filters" method="get" action="/timeline">
+    <label class="pw-filter">
+      <span>show</span>
+      <select name="kind" onchange="this.form.submit()">
+        {{range .KindOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <label class="pw-filter">
+      <span>severity</span>
+      <select name="severity" onchange="this.form.submit()">
+        {{range .SeverityOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <noscript><button type="submit">apply</button></noscript>
+  </form>
+
+  {{if .Days}}
+    <div id="pw-timeline" data-cursor="{{.Cursor}}">
+      {{range .Days}}
+        <div class="pw-day" data-day="{{.Key}}">
+          <div class="pw-day-label">{{.Label}}</div>
+          {{range .Events}}{{template "timeline-row" .}}{{end}}
+        </div>
+      {{end}}
+    </div>
+  {{else}}
+    <div class="pw-card">
+      <p class="pw-muted">No events match this filter.</p>
+    </div>
+  {{end}}
+
+  <p class="pw-muted pw-horizon">
+    {{if .Horizon}}
+      History begins {{.Horizon}} — events older than {{.HistoryDays}} days are deleted, so
+      an empty stretch before that date means they were pruned, not that nothing happened.
+    {{else}}
+      No events recorded yet. Routine rows appear after the first scan or bundle sync.
+    {{end}}
+  </p>
+  {{end}}
+</div>
+{{end}}

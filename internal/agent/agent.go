@@ -157,6 +157,13 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}, nil
 	}
 
+	// The daemon holds its own DB handle, and the timeline reads through it.
+	// Events are written by whichever process ran a scan or a sync — usually the
+	// CLI, not this one — so the stream polls rather than listening in-process.
+	srv.Events = st.Repo.Events
+	srv.OldestEvent = st.Repo.OldestEventAt
+	srv.HistoryDays = cfg.Agent.HistoryDays
+
 	router := chi.NewRouter()
 	router.Get("/health", daemon.HealthHandler("agent", started, func() (bool, string) {
 		return st.DB.PingContext(ctx) == nil, st.Bundle.Version

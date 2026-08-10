@@ -227,3 +227,62 @@ body { margin: 0; background: var(--bg); }
 
 .pw-badge-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
 .pw-badge-row-label { font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; width: 60px; flex: none; }
+
+/* ---- timeline ------------------------------------------------------------
+   The visual hierarchy here is the page doing triage. Routine rows (a scan
+   every six hours, a bundle sync) are recorded because their ABSENCE is
+   information — a timeline with no scans for two days is what a dead agent
+   looks like — but they must never compete with a block for attention. So they
+   are dimmer, tighter, and smaller, and actionable rows keep full weight. */
+
+.pw-filters { display: flex; gap: 16px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+.pw-filter { display: flex; gap: 7px; align-items: center; font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.pw-filter select {
+  background: var(--bg-elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 9px; font: inherit; font-size: 12px; text-transform: none; letter-spacing: 0;
+}
+.pw-filter select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.pw-day { margin-bottom: 22px; }
+.pw-day-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-faint); padding: 0 0 7px 2px;
+  position: sticky; top: 0; background: var(--bg); z-index: 1;
+}
+
+.pw-row {
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elevated); margin-bottom: 5px;
+  animation: pw-row-in 0.24s ease-out;
+}
+.pw-row-head {
+  display: grid; grid-template-columns: 52px 108px 1fr auto;
+  gap: 12px; align-items: center;
+  padding: 10px 13px; cursor: pointer; list-style: none;
+}
+.pw-row-head::-webkit-details-marker { display: none }
+.pw-row[data-flat] .pw-row-head { cursor: default }
+.pw-row-time { color: var(--text-faint); font-size: 11.5px; }
+.pw-row-kind { color: var(--text-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.pw-row-summary { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+
+/* Routine: dimmer and tighter, per the design. */
+.pw-row-routine { background: transparent; border-color: transparent; margin-bottom: 0; }
+.pw-row-routine .pw-row-head { padding: 4px 13px; }
+.pw-row-routine .pw-row-summary { color: var(--text-faint); font-size: 12px; }
+.pw-row-routine .pw-row-kind { color: var(--text-faint); }
+
+/* Critical, and any degraded gate regardless of severity. */
+.pw-row-alarming { background: var(--sev-critical-bg-subtle); border-color: var(--sev-critical-bg); }
+
+.pw-row-detail { padding: 2px 13px 13px 13px; animation: pw-expand 0.18s ease-out; }
+.pw-row-detail .pw-kv { grid-template-columns: 110px 1fr; font-size: 12px; }
+.pw-row-detail dt { color: var(--text-faint); }
+.pw-link { color: var(--accent); font-size: 12px; text-decoration: none; }
+.pw-link:hover { text-decoration: underline; }
+
+.pw-horizon { margin-top: 20px; font-size: 11.5px; max-width: 62ch; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-row, .pw-row-detail { animation: none }
+}
