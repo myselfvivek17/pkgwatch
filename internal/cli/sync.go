@@ -21,7 +21,7 @@ import (
 
 func syncCmd() *cobra.Command {
 	var fromFile, fromDir, sigPath, manifestPath string
-	var allowDowngrade bool
+	var allowDowngrade, rebuild bool
 
 	cmd := &cobra.Command{
 		Use:   "sync",
@@ -41,6 +41,15 @@ func syncCmd() *cobra.Command {
 				return err
 			}
 			switch {
+			case rebuild:
+				// Re-merge the sources already on disk. They were verified when
+				// they were installed and the merged file is derived from them,
+				// so this needs no network and re-decides no trust. It exists
+				// because the merged database can need rebuilding on its own --
+				// a new local index, or a file that got truncated.
+				if err := rebuildMerged(cmd, cfg); err != nil {
+					return err
+				}
 			case fromDir != "":
 				if err := installDir(cmd, cfg, fromDir, allowDowngrade); err != nil {
 					return err
@@ -89,6 +98,8 @@ func syncCmd() *cobra.Command {
 	cmd.Flags().StringVar(&fromDir, "dir", "", "install every advisory bundle in this directory")
 	cmd.Flags().StringVar(&manifestPath, "manifest", "", "manifest file (default: <file>.json)")
 	cmd.Flags().StringVar(&sigPath, "sig", "", "signature file (default: <file>.sig)")
+	cmd.Flags().BoolVar(&rebuild, "rebuild", false,
+		"re-merge the bundles already installed, without fetching anything")
 	cmd.Flags().BoolVar(&allowDowngrade, "allow-downgrade", false,
 		"install a bundle older than the one already present (normally refused)")
 	return cmd

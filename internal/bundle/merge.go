@@ -102,8 +102,27 @@ func Merge(sources []string, out string, builtAt time.Time) (Manifest, error) {
 		}
 	}
 
+	// Indexes the merged database needs and the shipped bundles do not.
+	//
+	// Bundles are downloaded by every agent, so an index in schemaSQL is paid
+	// for on the wire by everyone; the merged file is derived locally and never
+	// transferred, so it can afford one. Keeping it here also means no schema
+	// version bump and no re-signing every published bundle.
+	//
+	// Without this, any lookup by advisory id scans all 398,866 rows. The
+	// findings page does two such lookups per row, which measured 0.8s per
+	// finding on the home server — 21s for 25 findings, 71s for 100, and the
+	// dashboard wedged because one query held the connection the whole time.
+	if _, err := db.Exec(mergedIndexSQL); err != nil {
+		return Manifest{}, fmt.Errorf("bundle: index merged: %w", err)
+	}
+
 	if _, err := db.Exec("VACUUM"); err != nil {
 		return Manifest{}, fmt.Errorf("bundle: vacuum merged: %w", err)
+	}
+	// The planner needs statistics to prefer the new index over a scan.
+	if _, err := db.Exec("ANALYZE"); err != nil {
+		return Manifest{}, fmt.Errorf("bundle: analyze merged: %w", err)
 	}
 	if err := db.Close(); err != nil {
 		return Manifest{}, err
@@ -218,3 +237,12 @@ func (e ErrSchemaMismatch) Error() string {
 	return fmt.Sprintf("bundle %s uses schema %q but this build reads %q — re-sync it",
 		e.Source, e.Found, e.Want)
 }
+
+// mergedIndexSQL is applied to the merged database only.
+//
+// advisories has no index on id in the shipped schema, deliberately: it is a
+// text column, and on the real corpus an index over it costs megabytes that
+// every agent would download. Every lookup that starts from a finding starts
+// from an advisory id, though, so locally it is the difference between a
+// dashboard page and a stalled one.
+const mergedIndexSQL = `CREATE INDEX IF NOT EXISTS idx_adv_id ON advisories(id);`
