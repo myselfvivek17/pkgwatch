@@ -221,3 +221,32 @@ func boolToInt(b bool) int {
 	}
 	return 0
 }
+
+// RetirementSummary counts every retired row, not just a page of them.
+//
+// The audit page shows the most recent few hundred retirements and computed its
+// totals from that window, which meant a machine with 322 unreplaced
+// retirements below the fold reported none at all — the page whose whole job is
+// to catch silent losses, losing them silently.
+//
+// Same classification as RetiredPackages: replaced at the same install path is
+// an upgrade, replaced under a different ecosystem is a rename, and nothing
+// there is the only case that can be a collector dropping rows.
+func (a Agent) RetirementSummary() (total, orphaned, renamed int, err error) {
+	row := a.DB.QueryRow(`
+		WITH retired AS (
+			SELECT p.ecosystem AS ecosystem,
+				(SELECT q.ecosystem FROM packages q
+				 WHERE q.gone_at IS NULL
+				   AND q.name = p.name
+				   AND q.install_path = p.install_path
+				 ORDER BY q.last_seen DESC LIMIT 1) AS replacement
+			FROM packages p WHERE p.gone_at IS NOT NULL
+		)
+		SELECT COUNT(*),
+			COALESCE(SUM(replacement IS NULL), 0),
+			COALESCE(SUM(replacement IS NOT NULL AND replacement <> ecosystem), 0)
+		FROM retired`)
+	err = row.Scan(&total, &orphaned, &renamed)
+	return total, orphaned, renamed, err
+}

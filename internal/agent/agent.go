@@ -173,6 +173,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 		return st.Repo.Packages(limit)
 	}
+	srv.RetirementSummary = st.Repo.RetirementSummary
 	srv.Ecosystems = func() (map[string]int, []string, error) {
 		counts, err := st.Repo.EcosystemCounts()
 		return counts, st.Bundle.Ecosystems, err

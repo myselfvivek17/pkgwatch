@@ -18,10 +18,15 @@ type InventoryData struct {
 	ScopeFilter     []Option
 	ViewFilter      []Option
 
-	// Retired switches the table to the retirement audit.
-	Retired  bool
-	Orphaned int
-	Renamed  int
+	// Retired switches the table to the retirement audit. The three counts are
+	// whole-table totals, not totals of the rows on screen: a machine with 322
+	// unreplaced retirements below the fold would otherwise report none, which
+	// is the page whose job is to catch silent losses losing them silently.
+	Retired      bool
+	RetiredTotal int
+	Orphaned     int
+	Renamed      int
+	CountsAreAll bool
 
 	// Uncovered names ecosystems the inventory holds and the bundle does not,
 	// which is the difference between examined and unknown.
@@ -102,6 +107,16 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if retired && s.RetirementSummary != nil {
+		total, orphaned, renamed, err := s.RetirementSummary()
+		if err != nil {
+			http.Error(w, "retirement summary unavailable: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		data.RetiredTotal, data.Orphaned, data.Renamed = total, orphaned, renamed
+		data.CountsAreAll = true
+	}
+
 	for _, pkg := range rows {
 		if ecosystem != "" && pkg.Ecosystem != ecosystem {
 			continue
@@ -122,11 +137,9 @@ func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 			case pkg.ReplacedBy == "":
 				row.Replaced = "NOTHING"
 				row.Orphaned = true
-				data.Orphaned++
 			case pkg.ReplacedEcosystem != pkg.Ecosystem:
 				row.Replaced = pkg.ReplacedEcosystem + " " + pkg.ReplacedBy
 				row.Renamed = true
-				data.Renamed++
 			default:
 				row.Replaced = pkg.ReplacedBy
 			}

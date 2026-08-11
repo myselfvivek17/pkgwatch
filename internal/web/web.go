@@ -115,6 +115,10 @@ type Server struct {
 	Inventory  func(retired bool, limit int) ([]repo.PackageRow, error)
 	Ecosystems func() (map[string]int, []string, error)
 
+	// RetirementSummary counts every retired row rather than the page on
+	// screen, so the audit's totals do not depend on where pagination fell.
+	RetirementSummary func() (total, orphaned, renamed int, err error)
+
 	// HistoryDays is the retention window, shown so a timeline that stops is
 	// distinguishable from a machine that did nothing.
 	HistoryDays int

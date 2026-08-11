@@ -69,7 +69,9 @@
   {{end}}
 
   <div class="pw-notes">
-    <p class="pw-muted">{{.Shown}} row(s) shown.{{if .Truncated}} Showing the first {{.Limit}} — there are more.{{end}}</p>
+    <p class="pw-muted">
+      {{.Shown}} row(s) shown.{{if .Truncated}} Showing the first {{.Limit}}{{if .Retired}} of {{.RetiredTotal}}{{end}} — there are more.{{end}}
+    </p>
 
     {{if .Retired}}
       {{/*
@@ -77,12 +79,22 @@
         that decision gets audited. An upgrade leaves something at the same
         install path; nothing there is either a real uninstall or a collector
         that lost the row, and only the second is a bug.
+
+        The counts cover every retired row, not the page on screen. Counting
+        only what is visible would let a machine with hundreds of unreplaced
+        retirements below the fold report none — the audit losing exactly what
+        it exists to catch.
       */}}
       {{if .Orphaned}}
         <p class="pw-muted">
-          <b>{{.Orphaned}}</b> retired with nothing replacing them at the same path. Expected for a real
-          uninstall or a removed container; otherwise it is a collector that lost the row, which closes
-          that package's findings.
+          <b>{{.Orphaned}}</b> of all {{.RetiredTotal}} retirements had nothing replacing them at the same
+          path. Expected for a real uninstall or a removed container; otherwise it is a collector that lost
+          the row, which closes that package's findings.
+        </p>
+      {{else if .CountsAreAll}}
+        <p class="pw-muted">
+          All {{.RetiredTotal}} retirements were replaced at the same install path — ordinary upgrades and
+          renames, no rows lost.
         </p>
       {{end}}
       {{if .Renamed}}
@@ -90,9 +102,6 @@
           <b>{{.Renamed}}</b> moved to a different ecosystem identifier rather than being removed — the
           package never left, its purl changed, so findings closed and were detected again.
         </p>
-      {{end}}
-      {{if not (or .Orphaned .Renamed)}}
-        <p class="pw-muted">Every retirement here was replaced at the same install path — ordinary upgrades.</p>
       {{end}}
     {{else}}
       <p class="pw-muted">
