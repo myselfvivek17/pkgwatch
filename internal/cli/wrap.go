@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -73,22 +74,43 @@ const gateEnvMarker = "PKGWATCH_GATE"
 // Shell functions rather than aliases: aliases are not expanded in
 // non-interactive shells, and `npm` inside a Makefile or a package.json script
 // is exactly the invocation worth gating.
+//
+// %s is the absolute path of the binary printing the snippet, not the bare name
+// `pkgwatch`. These functions replace npm; if the name cannot be resolved when
+// they run, npm does not fall back to the real thing, it fails — so a snippet
+// that depends on PATH turns "pkgwatch is not installed correctly" into "npm is
+// broken in every shell". Found by running it: a fresh shell had not yet picked
+// up the PATH entry and every npm command died.
 var shellSnippets = map[string]string{
-	"bash": `npm()  { if [ -n "$PKGWATCH_GATE" ]; then command npm  "$@"; else pkgwatch npm "$@"; fi; }
-pip()  { if [ -n "$PKGWATCH_GATE" ]; then command pip  "$@"; else pkgwatch pip "$@"; fi; }
-pip3() { if [ -n "$PKGWATCH_GATE" ]; then command pip3 "$@"; else pkgwatch pip "$@"; fi; }`,
+	"bash": `npm()  { if [ -n "$PKGWATCH_GATE" ]; then command npm  "$@"; else "%[1]s" npm "$@"; fi; }
+pip()  { if [ -n "$PKGWATCH_GATE" ]; then command pip  "$@"; else "%[1]s" pip "$@"; fi; }
+pip3() { if [ -n "$PKGWATCH_GATE" ]; then command pip3 "$@"; else "%[1]s" pip "$@"; fi; }`,
 
-	"zsh": `npm()  { if [ -n "$PKGWATCH_GATE" ]; then command npm  "$@"; else pkgwatch npm "$@"; fi; }
-pip()  { if [ -n "$PKGWATCH_GATE" ]; then command pip  "$@"; else pkgwatch pip "$@"; fi; }
-pip3() { if [ -n "$PKGWATCH_GATE" ]; then command pip3 "$@"; else pkgwatch pip "$@"; fi; }`,
+	"zsh": `npm()  { if [ -n "$PKGWATCH_GATE" ]; then command npm  "$@"; else "%[1]s" npm "$@"; fi; }
+pip()  { if [ -n "$PKGWATCH_GATE" ]; then command pip  "$@"; else "%[1]s" pip "$@"; fi; }
+pip3() { if [ -n "$PKGWATCH_GATE" ]; then command pip3 "$@"; else "%[1]s" pip "$@"; fi; }`,
 
-	"fish": `function npm;  if set -q PKGWATCH_GATE; command npm  $argv; else; pkgwatch npm $argv; end; end
-function pip;  if set -q PKGWATCH_GATE; command pip  $argv; else; pkgwatch pip $argv; end; end
-function pip3; if set -q PKGWATCH_GATE; command pip3 $argv; else; pkgwatch pip $argv; end; end`,
+	"fish": `function npm;  if set -q PKGWATCH_GATE; command npm  $argv; else; "%[1]s" npm $argv; end; end
+function pip;  if set -q PKGWATCH_GATE; command pip  $argv; else; "%[1]s" pip $argv; end; end
+function pip3; if set -q PKGWATCH_GATE; command pip3 $argv; else; "%[1]s" pip $argv; end; end`,
 
-	"powershell": `function npm  { if ($env:PKGWATCH_GATE) { & (Get-Command npm  -CommandType Application | Select-Object -First 1).Source @args } else { pkgwatch npm @args } }
-function pip  { if ($env:PKGWATCH_GATE) { & (Get-Command pip  -CommandType Application | Select-Object -First 1).Source @args } else { pkgwatch pip @args } }
-function pip3 { if ($env:PKGWATCH_GATE) { & (Get-Command pip3 -CommandType Application | Select-Object -First 1).Source @args } else { pkgwatch pip @args } }`,
+	"powershell": `function npm  { if ($env:PKGWATCH_GATE) { & (Get-Command npm  -CommandType Application | Select-Object -First 1).Source @args } else { & "%[1]s" npm @args } }
+function pip  { if ($env:PKGWATCH_GATE) { & (Get-Command pip  -CommandType Application | Select-Object -First 1).Source @args } else { & "%[1]s" pip @args } }
+function pip3 { if ($env:PKGWATCH_GATE) { & (Get-Command pip3 -CommandType Application | Select-Object -First 1).Source @args } else { & "%[1]s" pip @args } }`,
+}
+
+// selfPath is the absolute path of this binary, for embedding in the snippet.
+// If it cannot be determined the bare name is used, which is the old behaviour
+// and better than emitting something certainly wrong.
+func selfPath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "pkgwatch"
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return exe
 }
 
 func shellInitCmd() *cobra.Command {
@@ -106,7 +128,7 @@ func shellInitCmd() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("no integration for shell %q — supported: bash, zsh, fish, powershell", args[0])
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), snippet)
+			fmt.Fprintln(cmd.OutOrStdout(), fmt.Sprintf(snippet, selfPath()))
 			return nil
 		},
 	}
