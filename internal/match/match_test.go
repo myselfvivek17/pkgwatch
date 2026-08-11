@@ -223,16 +223,23 @@ func TestScoreAndTier(t *testing.T) {
 			wantScore: 6.0, wantTier: TierMedium,
 		},
 		{
+			// Both multipliers apply and the score more than doubles, which is
+			// the point: this sorts above an untouched medium. The badge still
+			// says medium, because that is what the advisory says.
 			name:      "global and scripts compound",
 			adv:       Advisory{Kind: KindVulnerability, SeverityCVSS: cvss(4.0)},
 			pkg:       Package{Scope: ScopeGlobal, HasScripts: true, LastSeen: now},
-			wantScore: 9.0, wantTier: TierCritical,
+			wantScore: 9.0, wantTier: TierMedium,
 		},
 		{
-			name:      "a stale project dependency is discounted",
+			// The other direction, and the one worth being sure about: a
+			// forgotten dependency sinks down the list, and it is still a
+			// critical vulnerability. Ranking may discount it; the badge must
+			// not, or a 10.0 nobody has touched quietly reads as medium.
+			name:      "a stale project dependency is discounted in rank, not in tier",
 			adv:       Advisory{Kind: KindVulnerability, SeverityCVSS: cvss(10.0)},
 			pkg:       Package{Scope: ScopeProject, LastSeen: old},
-			wantScore: 4.0, wantTier: TierMedium,
+			wantScore: 4.0, wantTier: TierCritical,
 		},
 		{
 			name:      "high",
@@ -261,11 +268,16 @@ func TestScoreAndTier(t *testing.T) {
 			wantScore: 20.0, wantTier: TierCritical,
 		},
 		{
-			// The staleness discount applies to project scope only.
+			// The staleness discount applies to project scope only, so the
+			// multiplier still lifts the score. The tier does not follow it:
+			// the advisory rates this medium, and where a package happens to be
+			// installed does not make the vulnerability worse than its author
+			// says it is. Score is what the list sorts by; tier is what the
+			// badge claims.
 			name:      "a stale global package is not discounted",
 			adv:       Advisory{Kind: KindVulnerability, SeverityCVSS: cvss(6.0)},
 			pkg:       Package{Scope: ScopeGlobal, LastSeen: old},
-			wantScore: 9.0, wantTier: TierCritical,
+			wantScore: 9.0, wantTier: TierMedium,
 		},
 	}
 
@@ -280,4 +292,46 @@ func TestScoreAndTier(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The old behaviour is still available for anyone who wants install context to
+// drive the badge, and it has to keep working — the setting exists because both
+// readings are defensible, not because one is a mistake.
+func TestPromoteTiersRestoresContextDrivenTiers(t *testing.T) {
+	now := time.Now()
+	adv := Advisory{Kind: KindVulnerability, SeverityCVSS: cvss(6.0)}
+	pkg := Package{Scope: ScopeGlobal, LastSeen: now}
+
+	_, tier := Score(adv, pkg, now)
+	if tier != TierMedium {
+		t.Fatalf("default tier = %q, want medium — the advisory rates this medium", tier)
+	}
+
+	PromoteTiers = true
+	defer func() { PromoteTiers = false }()
+
+	score, tier := Score(adv, pkg, now)
+	if score != 9.0 {
+		t.Errorf("score = %v, want 9.0 — the multiplier applies either way", score)
+	}
+	if tier != TierCritical {
+		t.Errorf("promoted tier = %q, want critical", tier)
+	}
+}
+
+// Malware is critical under both settings. "There is a payload in this package"
+// is not a severity rating, and no policy about install context should be able
+// to file it as medium.
+func TestMalwareIsCriticalUnderBothPolicies(t *testing.T) {
+	now := time.Now()
+	adv := Advisory{Kind: KindMalware, SeverityCVSS: cvss(1.0)}
+	pkg := Package{Scope: ScopeProject, LastSeen: now}
+
+	for _, promote := range []bool{false, true} {
+		PromoteTiers = promote
+		if _, tier := Score(adv, pkg, now); tier != TierCritical {
+			t.Errorf("PromoteTiers=%v gave tier %q, want critical", promote, tier)
+		}
+	}
+	PromoteTiers = false
 }

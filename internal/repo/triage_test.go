@@ -8,10 +8,13 @@ import (
 	"github.com/myselfvivek17/pkgwatch/internal/repo"
 )
 
-func seedFinding(t *testing.T, store repo.Agent, purl, advisory, tier string) {
+// score matters as much as tier here: announcement decisions key on the
+// contextual score, so a fixture with a low tier and a score of 9 would be
+// announced and look like a bug in the code rather than in the fixture.
+func seedFinding(t *testing.T, store repo.Agent, purl, advisory, tier string, score float64) {
 	t.Helper()
 	if _, err := store.RecordFindings([]repo.Finding{{
-		PURL: purl, AdvisoryID: advisory, Score: 9, Tier: tier, State: repo.StateNew,
+		PURL: purl, AdvisoryID: advisory, Score: score, Tier: tier, State: repo.StateNew,
 	}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -35,8 +38,8 @@ func openPURLs(t *testing.T, store repo.Agent) map[string]string {
 // a deferred decision becomes a forgotten one.
 func TestIgnoreExpiresOnItsOwn(t *testing.T) {
 	store := newAgentDB(t)
-	seedFinding(t, store, "pkg:npm/lodash@4.17.20", "GHSA-x", "critical")
-	seedFinding(t, store, "pkg:npm/chalk@5.0.0", "GHSA-y", "low")
+	seedFinding(t, store, "pkg:npm/lodash@4.17.20", "GHSA-x", "critical", 9.8)
+	seedFinding(t, store, "pkg:npm/chalk@5.0.0", "GHSA-y", "low", 2.0)
 
 	until := time.Now().Add(24 * time.Hour)
 	for _, purl := range []string{"pkg:npm/lodash@4.17.20", "pkg:npm/chalk@5.0.0"} {
@@ -86,7 +89,7 @@ func TestIgnoreExpiresOnItsOwn(t *testing.T) {
 // who meant "I have seen this" silently hid it instead.
 func TestAcknowledgeKeepsItListed(t *testing.T) {
 	store := newAgentDB(t)
-	seedFinding(t, store, "pkg:npm/lodash@4.17.20", "GHSA-x", "critical")
+	seedFinding(t, store, "pkg:npm/lodash@4.17.20", "GHSA-x", "critical", 9.8)
 
 	if err := store.AcknowledgeFinding("pkg:npm/lodash@4.17.20", "GHSA-x", "known, fix next sprint"); err != nil {
 		t.Fatal(err)

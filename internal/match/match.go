@@ -162,13 +162,38 @@ func inRange(cmp comparator, version string, r Range) (bool, error) {
 	return true, nil
 }
 
+// PromoteTiers decides whether install context may raise a finding's tier.
+//
+// False — the default — means the tier follows the advisory's own severity and
+// the multipliers only affect ranking within it. True restores the original
+// behaviour from §5.2, where a globally installed package with install scripts
+// could sit two tiers above what the advisory rates.
+//
+// It is a variable rather than a constant because the two readings are both
+// defensible and the choice belongs to whoever runs this. What is not
+// defensible is the word "critical" meaning different things on two machines in
+// the same fleet: on one laptop 92% of criticals came from multipliers rather
+// than from any advisory rating a package critical, while the server's came
+// entirely from real 9.8s. A badge that means "this is as bad as it gets" on one
+// machine and "this is a medium CVE on your PATH" on another is a badge people
+// learn to ignore.
+var PromoteTiers = false
+
 // Score rates a finding, and returns the tier it lands in.
+//
+// Two numbers, deliberately. Score carries the install context — global scope,
+// lifecycle scripts, staleness — and is what the list sorts by, because a
+// medium in a package that runs install scripts genuinely deserves attention
+// before a medium in something dormant. Tier answers a different question: how
+// bad is this advisory. Letting context set the tier collapses the two, and the
+// collapse is what makes a triage list untrustworthy.
 func Score(adv Advisory, pkg Package, now time.Time) (float64, string) {
-	score := 5.0 // no upstream score is not the same as harmless
+	base := 5.0 // no upstream score is not the same as harmless
 	if adv.SeverityCVSS != nil {
-		score = *adv.SeverityCVSS
+		base = *adv.SeverityCVSS
 	}
 
+	score := base
 	if adv.Kind == KindMalware {
 		score *= 4.0
 	}
@@ -182,11 +207,15 @@ func Score(adv Advisory, pkg Package, now time.Time) (float64, string) {
 		score *= 0.4
 	}
 
-	return score, tierFor(adv, score)
+	if PromoteTiers {
+		return score, tierFor(adv, score)
+	}
+	return score, tierFor(adv, base)
 }
 
 // tierFor floors malware at critical regardless of score. Active malware and a
-// latent CVE must not share a scale.
+// latent CVE must not share a scale — that floor applies either way, because
+// "there is a payload in this package" is not a severity rating.
 func tierFor(adv Advisory, score float64) string {
 	switch {
 	case adv.Kind == KindMalware, score >= 9:

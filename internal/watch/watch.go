@@ -31,6 +31,10 @@ type Report struct {
 	// Unignored counts findings whose ignore window expired on this pass.
 	Unignored int
 
+	// Rescored counts findings whose score or tier changed, because the policy
+	// or the package's install context did.
+	Rescored int
+
 	// Baseline is set on the first pass a machine ever runs. Pre-existing
 	// low and medium findings are recorded acknowledged rather than announced.
 	Baseline     bool
@@ -109,7 +113,7 @@ func Run(handle *sql.DB, store repo.Agent, bundle repo.BundleInfo, now time.Time
 				AdvisoryID: adv.ID,
 				Score:      score,
 				Tier:       tier,
-				State:      stateFor(report.Baseline, adv, tier),
+				State:      stateFor(report.Baseline, adv, score),
 			})
 		}
 	}
@@ -130,6 +134,13 @@ func Run(handle *sql.DB, store repo.Agent, bundle repo.BundleInfo, now time.Time
 	// timeline and the notification telling the same story — a baseline pass
 	// that files 900 findings quietly must not then post 900 timeline rows.
 	recordFindingEvents(store, findings, now)
+
+	// Findings already on file keep the score they were first given, so a
+	// change in policy or in a package's context would otherwise never reach
+	// them — and every machine that has ever scanned already has findings.
+	if report.Rescored, err = store.RescoreFindings(findings); err != nil {
+		return report, err
+	}
 
 	for _, finding := range findings {
 		if finding.State == repo.StateAcknowledged {
@@ -190,23 +201,34 @@ func recordFindingEvents(store repo.Agent, findings []repo.Finding, now time.Tim
 
 // stateFor decides whether a finding is announced or filed quietly.
 //
-// On a machine's first pass, low and medium findings are recorded as already
+// On a machine's first pass, quiet findings are recorded as already
 // acknowledged. They are real, and they are also six-year-old dev dependencies
 // that were never news — announcing several hundred of them at once is exactly
 // how a person learns to ignore this tool's notifications.
 //
-// Critical and high are always announced, baseline or not, and malware is never
-// quietly filed regardless of what it scored. A machine that has been carrying
-// a compromised package since before pkgwatch was installed is the single most
-// important thing a first run can tell you.
-func stateFor(baseline bool, adv match.Advisory, tier string) string {
+// Deliberately keyed on the contextual score rather than the tier. Whether
+// something is worth interrupting a person about is a triage question, and
+// triage is exactly where install context belongs: a 7.2 in a dependency nobody
+// has touched in eight months is not day-one news, while the same advisory in a
+// globally installed package with lifecycle scripts is. The tier answers a
+// different question — how bad the advisory is — and letting it drive
+// announcements would have made a first scan noisier the moment tiers started
+// following advisory severity instead of install context.
+//
+// Malware is never quietly filed regardless of score. A machine that has been
+// carrying a compromised package since before pkgwatch was installed is the
+// single most important thing a first run can tell you.
+func stateFor(baseline bool, adv match.Advisory, score float64) string {
 	if !baseline || adv.Kind == match.KindMalware {
 		return repo.StateNew
 	}
-	switch tier {
-	case match.TierCritical, match.TierHigh:
+	if score >= announceAbove {
 		return repo.StateNew
-	default:
-		return repo.StateAcknowledged
 	}
+	return repo.StateAcknowledged
 }
+
+// announceAbove is the score at or above which a finding is announced rather
+// than filed quietly — the high threshold from §5.2, applied to the contextual
+// score.
+const announceAbove = repo.AnnounceAbove

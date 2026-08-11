@@ -10,6 +10,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/myselfvivek17/pkgwatch/internal/match"
+
 	"github.com/myselfvivek17/pkgwatch/internal/bundle"
 )
 
@@ -75,6 +77,19 @@ type AgentConfig struct {
 	// something, which are what an incident is reconstructed from.
 	HistoryDays int `toml:"history_days"`
 
+	// PromoteTiers lets install context raise a finding's tier, as §5.2
+	// originally specified: a medium advisory in a globally installed package
+	// with lifecycle scripts becomes critical.
+	//
+	// Off by default. Both readings are defensible, but with it on, "critical"
+	// means something different on two machines in the same fleet — on one
+	// laptop 92% of criticals came from these multipliers rather than from any
+	// advisory rating a package critical, while the home server's came entirely
+	// from real 9.8s. The multipliers still set the score either way, so
+	// context still decides what sorts to the top; this only governs what the
+	// badge claims.
+	PromoteTiers bool `toml:"promote_tiers"`
+
 	// ScanIntervalHours is how often the daemon re-scans and re-matches.
 	//
 	// The whole retroactive half of this tool depends on running without being
@@ -139,6 +154,7 @@ func Load(path string) (Config, error) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
+			applyScoringPolicy(cfg)
 			return withResolvedDataDir(cfg)
 		}
 		return cfg, fmt.Errorf("stat config %s: %w", path, err)
@@ -146,7 +162,19 @@ func Load(path string) (Config, error) {
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	applyScoringPolicy(cfg)
 	return withResolvedDataDir(cfg)
+}
+
+// applyScoringPolicy pushes the tier policy into the matcher.
+//
+// It lives on a package variable rather than being threaded through every
+// Score call because scoring happens in the gate, the watcher and the CLI, and
+// every one of them would otherwise carry a parameter it does not otherwise
+// need. Set once at load, read everywhere — the same value on every path, which
+// is the property that actually matters.
+func applyScoringPolicy(cfg Config) {
+	match.PromoteTiers = cfg.Agent.PromoteTiers
 }
 
 func withResolvedDataDir(cfg Config) (Config, error) {

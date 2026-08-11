@@ -5,6 +5,10 @@ import (
 	"time"
 )
 
+// AnnounceAbove is the contextual score at or above which a finding is
+// announced rather than filed quietly.
+const AnnounceAbove = 7.0
+
 // Finding states.
 const (
 	StateNew          = "new"
@@ -136,16 +140,20 @@ func (a Agent) ResolveFindingsForGonePackages(at time.Time) (int, error) {
 // Ignored stays ignored — that was a decision about the package, not about
 // whether it happened to be installed this week.
 //
-// Low and medium come back acknowledged rather than announced, matching what a
-// baseline pass would have done with them. Otherwise stopping and starting a
-// container promotes every quiet finding it holds into an announcement, which
-// is the "hundreds of alerts at once" failure arriving by a side door.
+// Quiet findings come back quiet, matching what a baseline pass would have done
+// with them. Otherwise stopping and starting a container promotes every quiet
+// finding it holds into an announcement, which is the "hundreds of alerts at
+// once" failure arriving by a side door.
+//
+// Keyed on score rather than tier, like the baseline rule: whether something is
+// worth announcing is a triage question and install context belongs in it,
+// while the tier says how bad the advisory is.
 func (a Agent) ReopenFindingsForPresentPackages() (int, error) {
 	result, err := a.DB.Exec(`UPDATE findings
-		SET state = CASE WHEN tier IN ('critical', 'high') THEN ? ELSE ? END
+		SET state = CASE WHEN score >= ? THEN ? ELSE ? END
 		WHERE state = ?
 		  AND purl IN (SELECT purl FROM packages WHERE gone_at IS NULL)`,
-		StateNew, StateAcknowledged, StateFixed)
+		AnnounceAbove, StateNew, StateAcknowledged, StateFixed)
 	if err != nil {
 		return 0, err
 	}
@@ -282,4 +290,47 @@ func scanFindings(rows *sql.Rows) ([]Finding, error) {
 		out = append(out, finding)
 	}
 	return out, rows.Err()
+}
+
+// RescoreFindings updates the score and tier of findings already on file.
+//
+// RecordFindings is INSERT OR IGNORE, which is what makes the watcher alert
+// once — and it means a finding's score and tier are frozen at the moment it
+// was first detected. That is wrong twice over: the scoring policy can change,
+// and so can the package's context (a project dependency goes stale, a package
+// gets installed globally as well). Without this, changing the tier policy
+// would appear to do nothing at all on any machine that already has findings,
+// which is every machine that has ever run a scan.
+//
+// State is deliberately untouched. How bad a finding is and whether someone has
+// dealt with it are different questions, and rescoring must not quietly reopen
+// something that was acknowledged.
+func (a Agent) RescoreFindings(findings []Finding) (int, error) {
+	if len(findings) == 0 {
+		return 0, nil
+	}
+
+	tx, err := a.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`UPDATE findings SET score = ?, tier = ?
+		WHERE purl = ? AND advisory_id = ? AND (score <> ? OR tier <> ?)`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	changed := 0
+	for _, finding := range findings {
+		result, err := stmt.Exec(finding.Score, finding.Tier,
+			finding.PURL, finding.AdvisoryID, finding.Score, finding.Tier)
+		if err != nil {
+			return 0, err
+		}
+		changed += rowsAffected(result)
+	}
+	return changed, tx.Commit()
 }

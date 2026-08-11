@@ -53,16 +53,16 @@ func (a Agent) IgnoreFinding(purl, advisoryID, note string, until time.Time) err
 // silently becomes "never mention this again" — the exact way a deferred
 // decision turns into a forgotten one.
 //
-// Restored at the severity it would have had: critical and high are news again,
-// lower tiers come back quiet, matching the baseline rule and the reopen rule.
-// A week-old ignore expiring must not produce the alert storm those exist to
-// prevent.
+// Restored at the weight it would have had: findings that score high enough to
+// interrupt someone are news again, quieter ones come back quiet, matching the
+// baseline rule and the reopen rule. A week-old ignore expiring must not
+// produce the alert storm those exist to prevent.
 func (a Agent) ExpireIgnores(now time.Time) (int, error) {
 	result, err := a.DB.Exec(`UPDATE findings
-		SET state = CASE WHEN tier IN ('critical', 'high') THEN ? ELSE ? END,
+		SET state = CASE WHEN score >= ? THEN ? ELSE ? END,
 		    ignore_until = NULL
 		WHERE state = ? AND ignore_until IS NOT NULL AND ignore_until <= ?`,
-		StateNew, StateAcknowledged, StateIgnored, now.Unix())
+		AnnounceAbove, StateNew, StateAcknowledged, StateIgnored, now.Unix())
 	if err != nil {
 		return 0, err
 	}

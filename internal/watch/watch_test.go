@@ -383,6 +383,14 @@ func TestReopenKeepsQuietFindingsQuiet(t *testing.T) {
 		t.Fatal(err)
 	}
 	installed(store, t, stale)
+	// Re-recording a package moves last_seen forward, which would make it no
+	// longer stale and legitimately rescore it upward. Keep it stale, since the
+	// case under test is a container coming back, not a dependency being
+	// actively used again.
+	if _, err := store.DB.Exec("UPDATE packages SET last_seen = ? WHERE purl = ?",
+		time.Now().Add(-200*24*time.Hour).Unix(), stale.PURL); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := watch.Run(handle, store, info, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -414,5 +422,58 @@ func TestReopenIsIdempotent(t *testing.T) {
 		if report.Reopened != 0 {
 			t.Fatalf("pass %d reopened %d — nothing was ever closed", i, report.Reopened)
 		}
+	}
+}
+
+// A finding's score and tier are written once, by INSERT OR IGNORE. If nothing
+// updates them, changing the tier policy does nothing on any machine that has
+// ever scanned — which is every machine that matters.
+func TestPolicyChangeReachesExistingFindings(t *testing.T) {
+	handle, store, info := newWatched(t)
+	// Global scope with lifecycle scripts: 7.2 base, 16.2 after multipliers.
+	pkg := repo.PackageRow{
+		PURL: "pkg:npm/lodash@4.17.20", Ecosystem: "npm", Name: "lodash",
+		Version: "4.17.20", Scope: match.ScopeGlobal, HasScripts: true,
+		InstallDir: "/usr/lib/node_modules/lodash",
+	}
+	installed(store, t, pkg)
+
+	if _, err := watch.Run(handle, store, info, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	open, err := store.OpenFindings(true, repo.FindingFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 {
+		t.Fatalf("findings = %+v", open)
+	}
+	if open[0].Tier != match.TierHigh {
+		t.Fatalf("tier = %q, want high — the advisory rates this 7.2", open[0].Tier)
+	}
+
+	// Someone turns the old behaviour back on.
+	match.PromoteTiers = true
+	defer func() { match.PromoteTiers = false }()
+
+	report, err := watch.Run(handle, store, info, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Rescored != 1 {
+		t.Errorf("Rescored = %d, want 1 — the stored finding still carries the old tier", report.Rescored)
+	}
+
+	open, err = store.OpenFindings(true, repo.FindingFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open[0].Tier != match.TierCritical {
+		t.Errorf("tier = %q, want critical after the policy change", open[0].Tier)
+	}
+	// Rescoring must not disturb triage state: how bad something is and whether
+	// someone has dealt with it are different questions.
+	if open[0].State != repo.StateNew {
+		t.Errorf("State = %q — rescoring changed triage state", open[0].State)
 	}
 }
