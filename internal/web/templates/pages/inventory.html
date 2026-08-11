@@ -1,0 +1,114 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">{{if .Data.Retired}}Retired packages{{else}}Inventory{{end}}</h1>
+
+  {{with .Data}}
+  {{/*
+    Coverage first, above the table. A list of packages with no statement about
+    which of them were actually checked is the failure this project keeps
+    hitting: an ecosystem the bundle does not carry returns no advisories, and
+    "no advisories" renders identically to "nothing wrong".
+  */}}
+  <div class="pw-eco-bar">
+    {{range .Ecosystems}}
+      <span class="pw-eco{{if not .Covered}} pw-eco-uncovered{{end}}"
+            title="{{if .Covered}}matched against the bundle{{else}}no advisories in the bundle — these packages are unknown, not clean{{end}}">
+        {{.Ecosystem}} <b>{{.Count}}</b>{{if not .Covered}} <span class="pw-eco-flag">unexamined</span>{{end}}
+      </span>
+    {{end}}
+  </div>
+
+  <form class="pw-filters" method="get" action="/inventory">
+    <label class="pw-filter">
+      <span>view</span>
+      <select name="view" onchange="this.form.submit()">
+        {{range .ViewFilter}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <label class="pw-filter">
+      <span>ecosystem</span>
+      <select name="ecosystem" onchange="this.form.submit()">
+        {{range .EcosystemFilter}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <label class="pw-filter">
+      <span>scope</span>
+      <select name="scope" onchange="this.form.submit()">
+        {{range .ScopeFilter}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <noscript><button type="submit">apply</button></noscript>
+  </form>
+
+  {{if .Rows}}
+    <table class="pw-table">
+      <thead>
+        <tr>
+          {{if .Retired}}<th>retired</th><th>replaced by</th>{{end}}
+          <th>ecosystem</th><th>name</th><th>version</th><th>scope</th><th>where</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Rows}}
+        <tr{{if .Orphaned}} class="pw-orphaned"{{end}}>
+          {{if $.Data.Retired}}
+            <td class="pw-mono pw-dim">{{.RetiredAt}}</td>
+            <td class="pw-mono{{if .Orphaned}} pw-orphan-cell{{else if .Renamed}} pw-dim{{end}}">{{.Replaced}}</td>
+          {{end}}
+          <td class="pw-mono pw-dim">{{.Ecosystem}}</td>
+          <td class="pw-mono">{{.Name}}</td>
+          <td class="pw-mono pw-dim">{{.Version}}</td>
+          <td class="pw-dim">{{.Scope}}</td>
+          <td class="pw-mono pw-dim pw-wrap">{{.Where}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  {{else}}
+    <div class="pw-card"><p class="pw-muted">Nothing matches this filter.</p></div>
+  {{end}}
+
+  <div class="pw-notes">
+    <p class="pw-muted">{{.Shown}} row(s) shown.{{if .Truncated}} Showing the first {{.Limit}} — there are more.{{end}}</p>
+
+    {{if .Retired}}
+      {{/*
+        Retiring a row closes every finding attached to it, so this view is how
+        that decision gets audited. An upgrade leaves something at the same
+        install path; nothing there is either a real uninstall or a collector
+        that lost the row, and only the second is a bug.
+      */}}
+      {{if .Orphaned}}
+        <p class="pw-muted">
+          <b>{{.Orphaned}}</b> retired with nothing replacing them at the same path. Expected for a real
+          uninstall or a removed container; otherwise it is a collector that lost the row, which closes
+          that package's findings.
+        </p>
+      {{end}}
+      {{if .Renamed}}
+        <p class="pw-muted">
+          <b>{{.Renamed}}</b> moved to a different ecosystem identifier rather than being removed — the
+          package never left, its purl changed, so findings closed and were detected again.
+        </p>
+      {{end}}
+      {{if not (or .Orphaned .Renamed)}}
+        <p class="pw-muted">Every retirement here was replaced at the same install path — ordinary upgrades.</p>
+      {{end}}
+    {{else}}
+      <p class="pw-muted">
+        Packages that are no longer installed are kept as history rather than deleted, so the timeline can
+        still answer what this machine was carrying when an advisory landed. See them under
+        <a class="pw-link" href="/inventory?view=retired">retired</a>.
+      </p>
+    {{end}}
+
+    {{if .Uncovered}}
+      <p class="pw-muted">
+        The bundle carries no advisories for {{range $i, $e := .Uncovered}}{{if $i}}, {{end}}<b>{{$e}}</b>{{end}}.
+        Those packages were not examined, which is not the same as finding nothing wrong with them.
+      </p>
+    {{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}

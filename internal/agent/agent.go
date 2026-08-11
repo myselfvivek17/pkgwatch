@@ -167,6 +167,16 @@ func Run(ctx context.Context, cfg config.Config) error {
 		rows, err := st.Repo.OpenFindings(st.BundleAttached, f)
 		return rows, st.BundleAttached, err
 	}
+	srv.Inventory = func(retired bool, limit int) ([]repo.PackageRow, error) {
+		if retired {
+			return st.Repo.RetiredPackages(limit)
+		}
+		return st.Repo.Packages(limit)
+	}
+	srv.Ecosystems = func() (map[string]int, []string, error) {
+		counts, err := st.Repo.EcosystemCounts()
+		return counts, st.Bundle.Ecosystems, err
+	}
 	// Writes only on the agent. A hub renders another machine's findings, and
 	// the agent is authoritative for its own data (§3.3).
 	srv.Acknowledge = st.Repo.AcknowledgeFinding

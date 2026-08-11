@@ -51,7 +51,7 @@ func nav(mode Mode, active string) []NavItem {
 		{Key: "findings", Label: "Findings triage", Href: "/findings", Enabled: true},
 		{Key: "block", Label: "Install block", Href: "/sessions"},
 		{Key: "credentials", Label: "Credential rotation", Href: "/rotate"},
-		{Key: "inventory", Label: "Inventory", Href: "/inventory"},
+		{Key: "inventory", Label: "Inventory", Href: "/inventory", Enabled: true},
 		{Key: "pairing", Label: "Device pairing", Href: "/devices"},
 		{Key: "settings", Label: "Settings", Href: "/settings"},
 		{Key: "quarantine", Label: "Quarantine", Href: "/quarantine"},
@@ -107,6 +107,13 @@ type Server struct {
 	// authoritative for its own data (§3.3) and sync is outbound-only.
 	Acknowledge func(purl, advisoryID, note string) error
 	Ignore      func(purl, advisoryID, note string, days int) error
+
+	// Inventory returns present packages, or retired ones when retired is true.
+	// Ecosystems returns the per-ecosystem counts alongside what the bundle
+	// actually covers, because a package list with no statement of what was
+	// examined is the failure this project keeps hitting.
+	Inventory  func(retired bool, limit int) ([]repo.PackageRow, error)
+	Ecosystems func() (map[string]int, []string, error)
 
 	// HistoryDays is the retention window, shown so a timeline that stops is
 	// distinguishable from a machine that did nothing.
@@ -188,7 +195,7 @@ type badgeRow struct {
 // it surfaces at construction rather than on the first request.
 func New(mode Mode, hostname string) (*Server, error) {
 	s := &Server{Mode: mode, Hostname: hostname, templates: map[string]*template.Template{}}
-	for _, page := range []string{"overview", "design", "timeline", "findings"} {
+	for _, page := range []string{"overview", "design", "timeline", "findings", "inventory"} {
 		tpl, err := template.ParseFS(assets,
 			"templates/layout.html",
 			"templates/partials/*.html",
@@ -211,6 +218,9 @@ func (s *Server) Routes(r chi.Router) {
 	if s.Events != nil {
 		r.Get("/timeline", s.handleTimeline)
 		r.Get("/events/stream", s.handleStream)
+	}
+	if s.Inventory != nil && s.Ecosystems != nil {
+		r.Get("/inventory", s.handleInventory)
 	}
 	if s.Findings != nil {
 		r.Get("/findings", s.handleFindings)

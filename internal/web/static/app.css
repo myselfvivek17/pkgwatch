@@ -320,3 +320,25 @@ body { margin: 0; background: var(--bg); }
 .pw-triage button:hover { background: var(--bg-hover); color: var(--text); }
 .pw-triage input { width: 44px; cursor: text; text-align: right; }
 .pw-ignore { display: flex; gap: 3px; align-items: center; color: var(--text-faint); font-size: 11px; }
+
+/* ---- inventory ----------------------------------------------------------- */
+
+/* Coverage sits above the table, not in a footnote. A package list with no
+   statement of which entries were actually checked is the failure this whole
+   project keeps rediscovering: an ecosystem the bundle does not carry returns
+   no advisories, and no advisories renders identically to nothing wrong. */
+.pw-eco-bar { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
+.pw-eco {
+  font-size: 11.5px; padding: 4px 9px; border-radius: 6px;
+  background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim);
+}
+.pw-eco b { color: var(--text); font-weight: 600; }
+.pw-eco-uncovered { border-color: var(--sev-high-border); background: var(--sev-high-bg); color: var(--sev-high-fg); }
+.pw-eco-uncovered b { color: var(--sev-high-fg); }
+.pw-eco-flag { text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.06em; }
+
+/* A retirement with nothing replacing it is either a real uninstall or a
+   collector that lost the row — and only the second is a bug, so it is the one
+   that gets marked. */
+.pw-orphaned td:first-child { box-shadow: inset 2px 0 0 var(--sev-high-fg); }
+.pw-orphan-cell { color: var(--sev-high-fg); }
