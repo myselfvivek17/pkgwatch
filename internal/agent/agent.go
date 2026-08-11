@@ -174,6 +174,19 @@ func Run(ctx context.Context, cfg config.Config) error {
 		return st.Repo.Packages(limit)
 	}
 	srv.RetirementSummary = st.Repo.RetirementSummary
+	srv.Sessions = st.Repo.Sessions
+	srv.SessionReport = func(id string) (repo.Session, []repo.Decision, []repo.Withheld, error) {
+		session, err := st.Repo.SessionByID(id)
+		if err != nil || session.ID == "" {
+			return session, nil, nil, err
+		}
+		decisions, err := st.Repo.SessionDecisions(id)
+		if err != nil {
+			return session, nil, nil, err
+		}
+		withheld, err := st.Repo.SessionWithheld(id)
+		return session, decisions, withheld, err
+	}
 	srv.Ecosystems = func() (map[string]int, []string, error) {
 		counts, err := st.Repo.EcosystemCounts()
 		return counts, st.Bundle.Ecosystems, err

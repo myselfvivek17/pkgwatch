@@ -1,0 +1,45 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">Install sessions</h1>
+
+  {{with .Data}}
+  {{if .Empty}}
+    <div class="pw-card">
+      <p class="pw-muted">
+        No gated installs recorded. Sessions are created by <span class="pw-mono">pkgwatch npm …</span>
+        and <span class="pw-mono">pkgwatch pip …</span>; the shared gate ports serve whatever points at
+        them and have no session to attribute decisions to.
+      </p>
+    </div>
+  {{else}}
+    <table class="pw-table">
+      <thead>
+        <tr>
+          <th>when</th><th>outcome</th><th class="pw-num">blocked</th><th class="pw-num">withheld</th>
+          <th class="pw-num">allowed</th><th>command</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Rows}}
+        <tr{{if .Interesting}} class="pw-row-alarming"{{end}}>
+          <td class="pw-mono pw-dim">{{.When}}</td>
+          <td><span class="pw-outcome pw-outcome-{{.Outcome}}">{{.Outcome}}</span></td>
+          <td class="pw-num pw-mono">{{if .Blocked}}<b>{{.Blocked}}</b>{{else}}0{{end}}</td>
+          <td class="pw-num pw-mono pw-dim">{{.Withheld}}</td>
+          <td class="pw-num pw-mono pw-dim">{{.Allowed}}</td>
+          <td class="pw-mono pw-wrap"><a class="pw-link" href="/sessions/{{.ID}}">{{.Argv}}</a></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    <div class="pw-notes">
+      <p class="pw-muted">
+        Withheld is not blocked. A withheld version was filtered out of a package listing so resolution
+        never chose it, which usually means the install simply succeeded on an older release. Blocked
+        means a download was refused outright.
+      </p>
+    </div>
+  {{end}}
+  {{end}}
+</div>
+{{end}}

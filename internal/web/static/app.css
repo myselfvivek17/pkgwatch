@@ -342,3 +342,16 @@ body { margin: 0; background: var(--bg); }
    that gets marked. */
 .pw-orphaned td:first-child { box-shadow: inset 2px 0 0 var(--sev-high-fg); }
 .pw-orphan-cell { color: var(--sev-high-fg); }
+
+/* ---- install sessions ---------------------------------------------------- */
+
+.pw-outcome {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 2px 7px; border-radius: 5px; border: 1px solid var(--border); color: var(--text-dim);
+}
+.pw-outcome-blocked { background: var(--sev-critical-bg); color: var(--sev-critical-fg); border-color: var(--sev-critical-bg); }
+.pw-outcome-approved { background: var(--sev-high-bg); color: var(--sev-high-fg); border-color: var(--sev-high-border); }
+.pw-outcome-aborted { background: var(--sev-medium-bg); color: var(--sev-medium-fg); border-color: var(--sev-medium-border); }
+/* Deliberately not styled as success: an unfinished session is one whose
+   outcome was never written, which is not the same as a clean one. */
+.pw-outcome-unfinished { border-style: dashed; }

@@ -49,7 +49,7 @@ func nav(mode Mode, active string) []NavItem {
 		first,
 		{Key: "timeline", Label: "Timeline", Href: "/timeline", Enabled: true},
 		{Key: "findings", Label: "Findings triage", Href: "/findings", Enabled: true},
-		{Key: "block", Label: "Install block", Href: "/sessions"},
+		{Key: "block", Label: "Install block", Href: "/sessions", Enabled: true},
 		{Key: "credentials", Label: "Credential rotation", Href: "/rotate"},
 		{Key: "inventory", Label: "Inventory", Href: "/inventory", Enabled: true},
 		{Key: "pairing", Label: "Device pairing", Href: "/devices"},
@@ -118,6 +118,10 @@ type Server struct {
 	// RetirementSummary counts every retired row rather than the page on
 	// screen, so the audit's totals do not depend on where pagination fell.
 	RetirementSummary func() (total, orphaned, renamed int, err error)
+
+	// Sessions and SessionReport back the install block report.
+	Sessions      func(limit int) ([]repo.Session, error)
+	SessionReport func(id string) (repo.Session, []repo.Decision, []repo.Withheld, error)
 
 	// HistoryDays is the retention window, shown so a timeline that stops is
 	// distinguishable from a machine that did nothing.
@@ -199,7 +203,7 @@ type badgeRow struct {
 // it surfaces at construction rather than on the first request.
 func New(mode Mode, hostname string) (*Server, error) {
 	s := &Server{Mode: mode, Hostname: hostname, templates: map[string]*template.Template{}}
-	for _, page := range []string{"overview", "design", "timeline", "findings", "inventory"} {
+	for _, page := range []string{"overview", "design", "timeline", "findings", "inventory", "sessions", "session-report"} {
 		tpl, err := template.ParseFS(assets,
 			"templates/layout.html",
 			"templates/partials/*.html",
@@ -225,6 +229,10 @@ func (s *Server) Routes(r chi.Router) {
 	}
 	if s.Inventory != nil && s.Ecosystems != nil {
 		r.Get("/inventory", s.handleInventory)
+	}
+	if s.Sessions != nil && s.SessionReport != nil {
+		r.Get("/sessions", s.handleSessions)
+		r.Get("/sessions/{id}", s.handleSessionReport)
 	}
 	if s.Findings != nil {
 		r.Get("/findings", s.handleFindings)

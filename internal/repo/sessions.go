@@ -95,7 +95,13 @@ func (a Agent) SessionDecisions(sessionID string) ([]Decision, error) {
 			return nil, err
 		}
 		d.AdvisoryID = advisory.String
-		d.At = time.Unix(at, 0).UTC()
+		// Local, like every other timestamp this tool shows. Rendering these in
+		// UTC while the session header beside them was local put a five and a
+		// half hour gap between an install and the refusal that happened inside
+		// it — two clocks in one report, and the reader has no way to tell which
+		// is which. Advisory published and modified dates stay UTC: those are
+		// facts about the wider world rather than about this machine's day.
+		d.At = time.Unix(at, 0)
 		out = append(out, d)
 	}
 	return out, rows.Err()
@@ -204,4 +210,83 @@ func nullIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// Session is one gated install run.
+type Session struct {
+	ID        string
+	StartedAt time.Time
+	EndedAt   time.Time
+	Ecosystem string
+	CWD       string
+	Argv      string
+	Context   string
+	Outcome   string
+
+	// Counts by decision, so the list can say what happened without loading
+	// every decision row for every session.
+	Blocked  int
+	Withheld int
+	Allowed  int
+}
+
+// Sessions returns recent install runs, newest first.
+func (a Agent) Sessions(limit int) ([]Session, error) {
+	rows, err := a.DB.Query(`SELECT s.id, s.started_at, COALESCE(s.ended_at, 0),
+		s.ecosystem, s.cwd, s.argv, s.context, COALESCE(s.outcome, ''),
+		COALESCE(SUM(d.decision = ?), 0),
+		COALESCE(SUM(d.decision = ?), 0),
+		COALESCE(SUM(d.decision = ?), 0)
+		FROM install_sessions s
+		LEFT JOIN install_decisions d ON d.session_id = s.id
+		GROUP BY s.id
+		ORDER BY s.started_at DESC LIMIT ?`,
+		DecisionBlocked, DecisionWithheld, DecisionAllowed, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSessions(rows)
+}
+
+// SessionByID returns one run, or a zero Session when there is no such id.
+func (a Agent) SessionByID(id string) (Session, error) {
+	rows, err := a.DB.Query(`SELECT s.id, s.started_at, COALESCE(s.ended_at, 0),
+		s.ecosystem, s.cwd, s.argv, s.context, COALESCE(s.outcome, ''),
+		COALESCE(SUM(d.decision = ?), 0),
+		COALESCE(SUM(d.decision = ?), 0),
+		COALESCE(SUM(d.decision = ?), 0)
+		FROM install_sessions s
+		LEFT JOIN install_decisions d ON d.session_id = s.id
+		WHERE s.id = ?
+		GROUP BY s.id`,
+		DecisionBlocked, DecisionWithheld, DecisionAllowed, id)
+	if err != nil {
+		return Session{}, err
+	}
+	defer rows.Close()
+
+	found, err := scanSessions(rows)
+	if err != nil || len(found) == 0 {
+		return Session{}, err
+	}
+	return found[0], nil
+}
+
+func scanSessions(rows *sql.Rows) ([]Session, error) {
+	var out []Session
+	for rows.Next() {
+		var s Session
+		var started, ended int64
+		if err := rows.Scan(&s.ID, &started, &ended, &s.Ecosystem, &s.CWD, &s.Argv,
+			&s.Context, &s.Outcome, &s.Blocked, &s.Withheld, &s.Allowed); err != nil {
+			return nil, err
+		}
+		s.StartedAt = time.Unix(started, 0)
+		if ended > 0 {
+			s.EndedAt = time.Unix(ended, 0)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }

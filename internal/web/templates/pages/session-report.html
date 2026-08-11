@@ -1,0 +1,95 @@
+{{define "content"}}
+<div class="pw-page">
+  {{with .Data}}
+  {{if .NotFound}}
+    <h1 class="pw-page-title">Install session</h1>
+    <div class="pw-card">
+      <p class="pw-muted">
+        No session with that id. Sessions are pruned with the rest of the history, so an old link
+        can outlive its record.
+      </p>
+    </div>
+  {{else}}
+    <h1 class="pw-page-title">Install session</h1>
+
+    <div class="pw-card">
+      <dl class="pw-kv">
+        <dt>command</dt><dd class="pw-mono">{{.Session.Argv}}</dd>
+        <dt>directory</dt><dd class="pw-mono">{{.Session.CWD}}</dd>
+        <dt>ecosystem</dt><dd>{{.Session.Ecosystem}}</dd>
+        <dt>context</dt><dd>{{.Session.Context}}</dd>
+        <dt>started</dt><dd>{{.Session.When}}{{if .Session.Elapsed}} · took {{.Session.Elapsed}}{{end}}</dd>
+        <dt>outcome</dt><dd><span class="pw-outcome pw-outcome-{{.Session.Outcome}}">{{.Session.Outcome}}</span></dd>
+      </dl>
+    </div>
+
+    {{if .Blocked}}
+      <div class="pw-card">
+        <div class="pw-section-title">Refused downloads</div>
+        <table class="pw-table">
+          <thead><tr><th>time</th><th>package</th><th>reason</th><th>advisory</th></tr></thead>
+          <tbody>
+            {{range .Blocked}}
+            <tr>
+              <td class="pw-mono pw-dim">{{.At}}</td>
+              <td class="pw-mono pw-wrap">{{.PURL}}</td>
+              <td>{{.Reason}}</td>
+              <td class="pw-mono pw-dim">{{if .Advisory}}{{.Advisory}}{{else}}—{{end}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    {{end}}
+
+    {{if .Withheld}}
+      <div class="pw-card">
+        <div class="pw-section-title">Versions withheld from resolution</div>
+        <table class="pw-table">
+          <thead><tr><th>package</th><th class="pw-num">versions</th><th>why</th></tr></thead>
+          <tbody>
+            {{range .Withheld}}
+            <tr>
+              <td class="pw-mono pw-wrap">{{.Package}}</td>
+              <td class="pw-num pw-mono">{{.Count}}</td>
+              <td class="pw-dim">
+                {{if .Advisories}}{{range $i, $a := .Advisories}}{{if $i}}, {{end}}{{$a}}{{end}}{{end}}
+                {{if .TooNew}}{{if .Advisories}} · {{end}}{{.TooNew}} newer than the publish buffer, nothing on file against them{{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        <p class="pw-muted">
+          These were filtered out of package listings, so resolution never chose them. That is not the
+          same as a block: an install that succeeded on an older release did so because of this, and
+          nothing was refused.
+        </p>
+      </div>
+    {{end}}
+
+    <div class="pw-notes">
+      <p class="pw-muted">{{.Allowed}} download(s) were allowed in this session.</p>
+      {{/*
+        The design shows a dependency chain from the requested package down to
+        the blocked leaf. It is not rendered here because it is not recorded:
+        npm resolves the tree on the client and asks the proxy for each package
+        independently, so the gate sees a flat sequence of requests with no
+        parent to attribute them to. Drawing a plausible chain would mean
+        inventing the one part of this report a person would most rely on.
+      */}}
+      <p class="pw-muted">
+        Which dependency pulled a refused package in is not recorded. The package manager resolves the
+        tree itself and asks for each package independently, so the gate sees requests with no parent
+        attached — <span class="pw-mono">npm ls &lt;package&gt;</span> in the project answers it.
+      </p>
+      <p class="pw-muted">
+        Overrides happen at install time, in the wrapper that prompts when the package manager exits.
+        This page is a record of what happened, not a control for it: approving here would write a
+        decision for a run that has already finished.
+      </p>
+    </div>
+  {{end}}
+  {{end}}
+</div>
+{{end}}
