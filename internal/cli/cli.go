@@ -105,11 +105,7 @@ func agentCmd() *cobra.Command {
 		},
 	}
 
-	pair := stub("pair", "Pair this agent with a hub", "M5", cobra.NoArgs)
-	pair.Flags().String("hub", "", "hub base URL, e.g. https://homelab:4875")
-	pair.Flags().String("code", "", "pairing code from `pkgwatch hub pair-code`")
-
-	cmd.AddCommand(pair, stub("unpair", "Forget the paired hub", "M5", cobra.NoArgs))
+	cmd.AddCommand(pairCmd(), unpairCmd())
 	return cmd
 }
 
@@ -129,17 +125,7 @@ func hubCmd() *cobra.Command {
 		},
 	}
 
-	devices := &cobra.Command{Use: "devices", Short: "Manage paired devices"}
-	devices.AddCommand(
-		stub("list", "List enrolled devices", "M5", cobra.NoArgs),
-		stub("approve <id>", "Approve a pending device", "M5", cobra.ExactArgs(1)),
-		stub("revoke <id>", "Revoke a device's token", "M5", cobra.ExactArgs(1)),
-	)
-
-	cmd.AddCommand(
-		stub("pair-code", "Generate a single-use pairing code", "M5", cobra.NoArgs),
-		setPasswordCmd(),
-		devices)
+	cmd.AddCommand(pairCodeCmd(), setPasswordCmd(), devicesCmd())
 	return cmd
 }
 

@@ -64,6 +64,44 @@ func (a Agent) HubState(key string) (string, error) {
 	return v.String, nil
 }
 
+// Keys in the agent's hub_state bag.
+const (
+	// HubDeviceKey holds the agent's ed25519 private key.
+	//
+	// In the database rather than its own file because the device token sits
+	// beside it and is equally sufficient to impersonate this machine — one
+	// artifact to protect and one to back up. The data directory is created
+	// 0700; on Windows there is no file mode to rely on either way.
+	HubDeviceKey = "device_key"
+	HubDeviceID  = "device_id"
+	HubToken     = "token"
+	HubURL       = "hub_url"
+	HubCertFP    = "cert_fp"
+	HubLastSync  = "last_sync"
+
+	// HubRevoked records that the hub refused this device. Stored rather than
+	// merely logged: a revoked agent must keep gating locally and stop syncing,
+	// and the difference between "revoked" and "cannot reach the hub" has to
+	// survive a restart or status has no way to say which one is true.
+	HubRevoked = "revoked_at"
+)
+
+func (a Agent) SetHubState(key, value string) error {
+	_, err := a.DB.Exec(`INSERT INTO hub_state (k, v) VALUES (?, ?)
+		ON CONFLICT(k) DO UPDATE SET v = excluded.v`, key, value)
+	return err
+}
+
+// ClearHubState forgets the pairing.
+//
+// The device key goes with it. Keeping it would mean re-pairing produced the
+// same device ID, and an ID that outlives the pairing it identified is the one
+// thing a person is asked to compare by eye.
+func (a Agent) ClearHubState() error {
+	_, err := a.DB.Exec("DELETE FROM hub_state")
+	return err
+}
+
 // BundleInfo describes the attached advisory bundle.
 type BundleInfo struct {
 	Attached    bool

@@ -125,6 +125,9 @@ func Run(ctx context.Context, cfg config.Config) error {
 	router.Get("/health", daemon.HealthHandler("hub", started, func() (bool, string) {
 		return st.DB.PingContext(ctx) == nil, ""
 	}))
+	// Agents authenticate with a device token and a signature, not the hub
+	// password, so the API sits outside the dashboard's session guard.
+	st.API(router, time.Now)
 	srv.Routes(router)
 
 	ln, err := daemon.Listen(cfg.Hub.Bind, cfg.Hub.Port)
