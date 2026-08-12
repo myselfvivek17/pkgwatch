@@ -1,0 +1,56 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">Fleet overview</h1>
+
+  {{with .Data}}
+  {{if .Empty}}
+    <div class="pw-card">
+      <div class="pw-section-title">No devices</div>
+      <p class="pw-muted">
+        Nothing is paired with this hub yet. Generate a code with
+        <code class="pw-mono">pkgwatch hub pair-code</code> and run
+        <code class="pw-mono">pkgwatch agent pair</code> on the machine.
+      </p>
+      <p class="pw-muted">
+        This says nothing about whether those machines are clean — an unpaired agent
+        still gates and still scans, it just does not report here.
+      </p>
+    </div>
+  {{else}}
+
+  {{if .Critical}}
+  <div class="pw-alert">
+    <div class="pw-alert-title">
+      {{.Critical}} machine{{if ne .Critical 1}}s{{end}} with critical findings
+    </div>
+    <div class="pw-alert-actions">
+      <a href="/findings?tier=critical">View findings</a>
+      <span class="pw-alert-action is-disabled" title="Not built yet — lands in M6">Start credential rotation</span>
+    </div>
+  </div>
+  {{end}}
+
+  <div class="pw-fleet-summary {{.StateClass}}">
+    <span class="pw-fleet-state">{{.State}}</span>
+    <span class="pw-fleet-counts">
+      {{.Reporting}} reporting
+      {{if .Unreporting}}· <strong>{{.Unreporting}} not reporting</strong>{{end}}
+      {{if .Waiting}}· {{.Waiting}} waiting for approval{{end}}
+    </span>
+  </div>
+
+  <div class="pw-machines">
+    {{range .Machines}}
+      {{template "machine-card" .}}
+    {{end}}
+  </div>
+
+  <p class="pw-muted" style="margin-top:18px">
+    A machine that has stopped reporting shows no finding counts at all. The last numbers
+    it sent describe a machine that may have been patched, compromised or switched off
+    since — presenting them as current would be worse than showing nothing.
+  </p>
+  {{end}}
+  {{end}}
+</div>
+{{end}}

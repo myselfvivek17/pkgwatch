@@ -1,0 +1,48 @@
+{{/*
+  One machine on the fleet grid. Takes a Machine.
+
+  The offline treatment is required, not decorative: dashed border, hatched
+  background, how long it has been quiet, and "gate status unknown". A machine
+  that has stopped reporting must never render as a clean one — that is hard
+  rule 1 made visible, and it is the single most important thing on this page.
+
+  Do not add a finding count to a card that is not reporting. Any number there
+  reads as current.
+*/}}
+{{define "machine-card"}}
+<div class="pw-machine{{if not .Reporting}} is-offline{{end}}{{if .Pending}} is-pending{{end}}{{if .Revoked}} is-revoked{{end}}">
+  <div class="pw-machine-head">
+    <span class="pw-machine-name">{{.Device.Hostname}}</span>
+    {{if .Reporting}}
+      <span class="pw-gate is-on"><span class="pw-gate-dot"></span>gate on</span>
+    {{else if .Pending}}
+      <span class="pw-gate is-unknown">not approved</span>
+    {{else if .Revoked}}
+      <span class="pw-gate is-unknown">revoked</span>
+    {{else}}
+      <span class="pw-gate is-unknown">gate: unknown</span>
+    {{end}}
+  </div>
+
+  <div class="pw-machine-meta pw-mono">{{.Device.OS}}/{{.Device.Arch}} · {{.Device.ID}}</div>
+
+  {{if .Reporting}}
+    {{$tiers := .FindingTiers}}
+    {{if $tiers}}
+      <div class="pw-badge-row">
+        {{range $tiers}}
+          {{template "severity-badge" .}}
+          <span class="pw-badge-count pw-mono">×{{.Count}}</span>
+        {{end}}
+      </div>
+    {{end}}
+    <div class="pw-machine-note">last reported {{.Silence}} ago</div>
+  {{else if .NeverReported}}
+    <div class="pw-machine-silence">NEVER REPORTED</div>
+  {{else if .Device.Approved}}
+    <div class="pw-machine-silence">NOT REPORTING — {{.Silence}}</div>
+  {{end}}
+
+  <div class="pw-machine-note">{{.Note}}</div>
+</div>
+{{end}}

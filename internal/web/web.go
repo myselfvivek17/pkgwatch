@@ -52,7 +52,8 @@ func nav(mode Mode, active string) []NavItem {
 		{Key: "block", Label: "Install block", Href: "/sessions", Enabled: true},
 		{Key: "credentials", Label: "Credential rotation", Href: "/rotate"},
 		{Key: "inventory", Label: "Inventory", Href: "/inventory", Enabled: true},
-		{Key: "pairing", Label: "Device pairing", Href: "/devices"},
+		// Pairing is a hub-only page: an agent has nothing to approve.
+		{Key: "pairing", Label: "Device pairing", Href: "/devices", Enabled: mode == ModeHub},
 		{Key: "settings", Label: "Settings", Href: "/settings"},
 		{Key: "quarantine", Label: "Quarantine", Href: "/quarantine"},
 	}
@@ -129,6 +130,13 @@ type Server struct {
 	// Sessions and SessionReport back the install block report.
 	Sessions      func(limit int) ([]repo.Session, error)
 	SessionReport func(id string) (repo.Session, []repo.Decision, []repo.Withheld, error)
+
+	// Devices, DeviceFindings and SetDeviceStatus back the fleet and pairing
+	// pages. Set on a hub only; an agent has no fleet, and its overview stays
+	// the single-machine one.
+	Devices         func() ([]repo.Device, error)
+	DeviceFindings  func(deviceID string) (map[string]int, error)
+	SetDeviceStatus func(deviceID, status string) error
 
 	// HistoryDays is the retention window, shown so a timeline that stops is
 	// distinguishable from a machine that did nothing.
@@ -210,7 +218,8 @@ type badgeRow struct {
 // it surfaces at construction rather than on the first request.
 func New(mode Mode, hostname string) (*Server, error) {
 	s := &Server{Mode: mode, Hostname: hostname, templates: map[string]*template.Template{}}
-	for _, page := range []string{"overview", "design", "timeline", "findings", "inventory", "sessions", "session-report"} {
+	for _, page := range []string{"overview", "design", "timeline", "findings", "inventory",
+		"sessions", "session-report", "fleet", "devices"} {
 		tpl, err := template.ParseFS(assets,
 			"templates/layout.html",
 			"templates/partials/*.html",
@@ -251,7 +260,18 @@ func (s *Server) Routes(r chi.Router) {
 		if s.Auth != nil {
 			r.Use(s.Auth.Require)
 		}
-		r.Get("/", s.handleOverview)
+		// On a hub with devices wired, "/" is the fleet. Everywhere else it
+		// stays the single-machine overview.
+		if s.Devices != nil && s.DeviceFindings != nil {
+			r.Get("/", s.handleFleet)
+			r.Get("/devices", s.handleDevices)
+			if s.SetDeviceStatus != nil {
+				r.Post("/devices/action", guard(s.handleDeviceAction))
+			}
+		} else {
+			r.Get("/", s.handleOverview)
+		}
+		r.Get("/machine", s.handleOverview)
 		r.Get("/design", s.handleDesign)
 		if s.Events != nil {
 			r.Get("/timeline", s.handleTimeline)

@@ -1,6 +1,8 @@
 package repo
 
 import (
+	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -155,6 +157,90 @@ func (h Hub) ReplacePackages(deviceID string, packages []FleetPackage) (int, err
 		}
 	}
 	return len(packages), tx.Commit()
+}
+
+// FleetEvents returns the fleet timeline, reusing the agent timeline's filter
+// and row type so one set of templates renders both (§8).
+//
+// Kind and severity filters apply as they do locally. The machine filter the
+// design shows on the hub is not wired yet — the rows carry a device, but the
+// Event type does not, and inventing a column here would mean the two timelines
+// stop being the same thing.
+func (h Hub) FleetEvents(f EventFilter) ([]Event, error) {
+	query := `SELECT id, ts, kind, COALESCE(severity, ''), COALESCE(purl, ''),
+		COALESCE(advisory_id, ''), COALESCE(detail_json, '')
+		FROM fleet_events WHERE 1=1`
+	var args []any
+
+	if f.Kind != "" {
+		if f.Kind == "routine" || f.Kind == "actionable" {
+			kinds := make([]string, 0, len(routineKinds))
+			for kind := range routineKinds {
+				kinds = append(kinds, kind)
+			}
+			op := "IN"
+			if f.Kind == "actionable" {
+				op = "NOT IN"
+			}
+			query += " AND kind " + op + " (?" + strings.Repeat(",?", len(kinds)-1) + ")"
+			for _, kind := range kinds {
+				args = append(args, kind)
+			}
+		} else {
+			query += " AND kind = ?"
+			args = append(args, f.Kind)
+		}
+	}
+	if f.Severity != "" {
+		query += " AND severity = ?"
+		args = append(args, f.Severity)
+	}
+
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	if f.SinceID > 0 {
+		query += " AND id > ? ORDER BY id ASC LIMIT ?"
+		args = append(args, f.SinceID, limit)
+	} else {
+		query += " ORDER BY id DESC LIMIT ?"
+		args = append(args, limit)
+	}
+
+	rows, err := h.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Event
+	for rows.Next() {
+		var e Event
+		var ts int64
+		var detail string
+		if err := rows.Scan(&e.ID, &ts, &e.Kind, &e.Severity, &e.PURL,
+			&e.AdvisoryID, &detail); err != nil {
+			return nil, err
+		}
+		e.At = time.Unix(ts, 0)
+		e.Detail = decodeDetail(detail)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// OldestFleetEventAt reports where the hub's timeline actually begins, so a
+// page that runs out can say so rather than implying nothing happened before.
+func (h Hub) OldestFleetEventAt() (time.Time, error) {
+	var ts sql.NullInt64
+	if err := h.DB.QueryRow("SELECT MIN(ts) FROM fleet_events").Scan(&ts); err != nil {
+		return time.Time{}, err
+	}
+	if !ts.Valid {
+		return time.Time{}, nil
+	}
+	return time.Unix(ts.Int64, 0), nil
 }
 
 // FleetFindingCounts returns open findings per tier for one device.

@@ -356,6 +356,75 @@ body { margin: 0; background: var(--bg); }
    outcome was never written, which is not the same as a clean one. */
 .pw-outcome-unfinished { border-style: dashed; }
 
+/* ---- fleet overview ------------------------------------------------------ */
+
+.pw-alert {
+  background: var(--sev-critical-bg-subtle);
+  border: 1px solid var(--sev-critical-bg);
+  border-radius: 7px; padding: 14px 16px; margin-bottom: 14px;
+}
+.pw-alert-title { font-weight: 650; font-size: 13.5px; color: var(--sev-critical-fg); margin-bottom: 8px; }
+.pw-alert-actions { display: flex; gap: 14px; font-size: 12px; flex-wrap: wrap; }
+.pw-alert-actions a { color: var(--accent); }
+.pw-alert-action.is-disabled { color: var(--text-faint); cursor: not-allowed; text-decoration: line-through; }
+
+.pw-fleet-summary {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 16px;
+  border: 1px solid var(--border); border-radius: 7px; background: var(--bg-elevated);
+}
+.pw-fleet-state { font-weight: 650; font-size: 13.5px; }
+.pw-fleet-counts { font-size: 12px; color: var(--text-dim); }
+.pw-fleet-summary.is-critical { border-color: var(--sev-critical-bg); }
+.pw-fleet-summary.is-critical .pw-fleet-state { color: var(--sev-critical-fg); }
+.pw-fleet-summary.is-warn { border-color: var(--sev-high-border); }
+.pw-fleet-summary.is-warn .pw-fleet-state { color: var(--sev-high-fg); }
+
+.pw-machines {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+}
+.pw-machine {
+  border: 1px solid var(--border); border-radius: 7px;
+  background: var(--bg-elevated); padding: 13px 15px;
+  animation: pw-fade-in 0.2s ease-out;
+}
+.pw-machine-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.pw-machine-name { font-weight: 650; font-size: 13.5px; }
+.pw-machine-meta { font-size: 10.5px; color: var(--text-faint); margin-bottom: 10px; overflow-wrap: anywhere; }
+.pw-machine-note { font-size: 11.5px; color: var(--text-dim); margin-top: 8px; }
+.pw-badge-count { font-size: 10.5px; color: var(--text-faint); margin-left: -6px; }
+
+.pw-gate { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+.pw-gate.is-on { color: var(--text-dim); display: inline-flex; align-items: center; gap: 5px; }
+.pw-gate.is-unknown { color: var(--text-faint); font-style: italic; }
+.pw-gate-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+  animation: pw-pulse 2s ease-in-out infinite;
+}
+
+/* A machine that has stopped reporting must never render as a clean one. The
+   dashed border and the hatching are the page refusing to present absent data
+   as a result — that is hard rule 1 made visible, and it is why there is no
+   finding count on these cards at all. */
+.pw-machine.is-offline {
+  border-style: dashed; border-color: var(--border-strong);
+  background-image: repeating-linear-gradient(
+    45deg, transparent, transparent 6px,
+    var(--bg-sunken) 6px, var(--bg-sunken) 12px);
+}
+.pw-machine.is-offline .pw-machine-name { color: var(--text-dim); }
+.pw-machine-silence {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.04em; color: var(--sev-high-fg); margin-top: 4px;
+}
+.pw-machine.is-pending .pw-machine-silence,
+.pw-machine.is-revoked .pw-machine-silence { color: var(--text-faint); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-gate-dot { animation: none; }
+}
+
 .pw-signout { margin-top: 6px; }
 .pw-signout button {
   background: none; border: none; padding: 0;

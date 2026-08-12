@@ -121,6 +121,16 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}, nil
 	}
 
+	srv.Devices = st.Repo.Devices
+	srv.DeviceFindings = st.Repo.FleetFindingCounts
+	srv.SetDeviceStatus = func(id, status string) error {
+		return st.Repo.SetDeviceStatus(id, status, time.Now())
+	}
+
+	// Fleet events, so the hub's timeline is every machine's rather than none.
+	srv.Events = st.Repo.FleetEvents
+	srv.OldestEvent = st.Repo.OldestFleetEventAt
+
 	router := chi.NewRouter()
 	router.Get("/health", daemon.HealthHandler("hub", started, func() (bool, string) {
 		return st.DB.PingContext(ctx) == nil, ""

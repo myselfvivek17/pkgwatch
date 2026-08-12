@@ -1,0 +1,63 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">Device pairing</h1>
+
+  {{with .Data}}
+  {{if .Problem}}<p class="pw-login-problem" role="alert">{{.Problem}}</p>{{end}}
+  {{if .Done}}<p class="pw-muted" role="status">{{.Done}}</p>{{end}}
+
+  <div class="pw-card">
+    <div class="pw-section-title">Approving a device</div>
+    <p class="pw-muted">
+      The device ID below is derived from that machine's key. Before approving, check it
+      character for character against the ID printed by <code class="pw-mono">pkgwatch agent
+      pair</code> on the machine itself. That comparison is the only thing standing between
+      this and something on the network that guessed a pairing code — approving without it
+      is approving whatever answered.
+    </p>
+  </div>
+
+  {{if not .Devices}}
+    <div class="pw-card">
+      <p class="pw-muted">
+        No devices enrolled. Generate a code with <code class="pw-mono">pkgwatch hub pair-code</code>.
+      </p>
+    </div>
+  {{else}}
+  <table class="pw-table">
+    <thead>
+      <tr><th>Device ID</th><th>Host</th><th>OS</th><th>Status</th><th>Last report</th><th></th></tr>
+    </thead>
+    <tbody>
+      {{range .Devices}}
+      <tr>
+        <td class="pw-mono">{{.Device.ID}}</td>
+        <td>{{.Device.Hostname}}</td>
+        <td class="pw-mono">{{.Device.OS}}/{{.Device.Arch}}</td>
+        <td>{{.Device.Status}}</td>
+        {{/* Never a timestamp for a machine that has never sent anything —
+             "never" and "a while ago" are different problems. */}}
+        <td>{{if .Device.EverReported}}{{.Silence}} ago{{else}}never{{end}}</td>
+        <td class="pw-triage">
+          <form method="post" action="/devices/action">
+            <input type="hidden" name="device" value="{{.Device.ID}}">
+            {{if .Device.Approved}}
+              <button name="action" value="revoke" type="submit">Revoke</button>
+            {{else}}
+              <button name="action" value="approve" type="submit">Approve</button>
+            {{end}}
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{end}}
+
+  <p class="pw-muted" style="margin-top:16px">
+    Revoking stops a device syncing. It keeps gating installs on its own machine — that
+    never depended on this hub — and its history stays here.
+  </p>
+  {{end}}
+</div>
+{{end}}
