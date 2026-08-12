@@ -22,6 +22,18 @@ const (
 	// place they are ever visible — filing them under the "machinery ran" rule
 	// would dim the one row that says a vulnerability came back.
 	EventFindingFixed = "finding_fixed"
+
+	// EventSyncDropped records that the outbound queue hit its cap and the
+	// least important events were abandoned. It exists so the resulting gap in
+	// the hub's timeline arrives with an explanation rather than reading as a
+	// quiet week.
+	EventSyncDropped = "sync_dropped"
+
+	// EventSyncRefused records the hub turning this device away for a reason
+	// retrying cannot fix — revoked, or no longer known. Recorded locally
+	// because a revoked agent that kept quietly retrying would look identical
+	// to a healthy one on a network where the hub happens to be down.
+	EventSyncRefused = "sync_refused"
 )
 
 // routineKinds are the events that say the machinery ran, not that something

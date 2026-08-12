@@ -206,9 +206,23 @@ func printStatus(cmd *cobra.Command, cfg config.Config) error {
 			counts["critical"], counts["high"], counts["medium"], counts["low"])
 	}
 
-	if st.Paired {
+	// Three states, not two. An agent the hub has revoked is still paired, still
+	// gating and reporting to nobody — showing it as "paired" would be a healthy
+	// line above a machine that has been silent for a week.
+	switch {
+	case st.RevokedAt != "":
+		fmt.Fprintf(w, "hub\tREFUSED by %s since %s — not syncing\n", orDash(st.HubURL), st.RevokedAt)
+		fmt.Fprintf(w, "\tgating and scanning are unaffected; re-approve it on the hub, or `pkgwatch agent unpair`\n")
+	case st.Paired:
 		fmt.Fprintf(w, "hub\tpaired — %s\n", orDash(st.HubURL))
-	} else {
+		if st.LastSync == "" {
+			// "Approved but never reported" is a different problem from "stopped
+			// reporting", and a dash where a timestamp goes is what says which.
+			fmt.Fprintf(w, "\tno successful sync yet — the hub may still be waiting for approval\n")
+		} else {
+			fmt.Fprintf(w, "last sync\t%s\n", st.LastSync)
+		}
+	default:
 		fmt.Fprintf(w, "hub\tnot paired — local only (the agent does not need one)\n")
 	}
 

@@ -33,6 +33,13 @@ type State struct {
 	Bundle          repo.BundleInfo
 	Paired          bool
 	HubURL          string
+
+	// RevokedAt is when the hub last refused this device outright. Carried
+	// separately from Paired because "paired and refused" is its own state: the
+	// agent still gates and still scans, and it is reporting to nobody. An
+	// agent that showed only "paired" there would look healthy while silent.
+	RevokedAt string
+	LastSync  string
 	Hostname        string
 	AdvisoryDBPath  string
 	warnBundleError error
@@ -93,6 +100,14 @@ func Open(cfg config.Config) (*State, error) {
 	if st.HubURL == "" {
 		st.HubURL = cfg.Agent.HubURL
 	}
+	if st.RevokedAt, err = st.Repo.HubState(repo.HubRevoked); err != nil {
+		handle.Close()
+		return nil, fmt.Errorf("read revocation state: %w", err)
+	}
+	if st.LastSync, err = st.Repo.HubState(repo.HubLastSync); err != nil {
+		handle.Close()
+		return nil, fmt.Errorf("read last sync: %w", err)
+	}
 
 	return st, nil
 }
@@ -125,6 +140,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// remembers to type `pkgwatch scan`, which means the tool answers questions
 	// you already thought to ask.
 	go runPeriodicScans(ctx, cfg)
+
+	// Outbound only, and entirely optional. Nothing above waits on it, and an
+	// unreachable hub costs the agent nothing but a log line (§0, hard rule 1).
+	go runSync(ctx, cfg)
 
 	srv, err := web.New(web.ModeAgent, st.Hostname)
 	if err != nil {
