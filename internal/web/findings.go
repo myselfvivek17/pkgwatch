@@ -24,6 +24,10 @@ type FindingsData struct {
 	// CanTriage is false on the hub, where findings belong to another machine.
 	CanTriage bool
 	Back      string
+
+	// ShowMachine adds the machine column, which only the hub has anything to
+	// put in.
+	ShowMachine bool
 }
 
 // FindingRow is one finding, shaped for display.
@@ -37,6 +41,7 @@ type FindingRow struct {
 	Advisory string
 	Summary  string
 	State    string
+	Machine  string
 
 	// Promoted marks a finding scoring above the advisory's own CVSS, so the
 	// two numbers disagreeing reads as intent rather than as a bug.
@@ -84,6 +89,10 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request) {
 			Advisory: finding.AdvisoryID,
 			Summary:  finding.Summary,
 			State:    finding.State,
+			Machine:  finding.Machine,
+		}
+		if finding.Machine != "" {
+			data.ShowMachine = true
 		}
 		if finding.BaseCVSS != nil {
 			row.CVSS = fmt.Sprintf("%.1f", *finding.BaseCVSS)

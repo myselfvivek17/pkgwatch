@@ -39,22 +39,31 @@ type NavItem struct {
 	Active  bool
 }
 
-// nav is the design's nine items in order. Enabled flips on as milestones land.
-func nav(mode Mode, active string) []NavItem {
+// nav is the design's items in order.
+//
+// Every Enabled flag is read from the handler that serves the page, never from
+// the mode. Hardcoding them meant the hub's sidebar offered Findings triage,
+// Install block and Inventory while Routes never mounted any of the three, so
+// three menu items and the fleet page's own "View findings" link all led to a
+// 404. A nav item is a promise that a page exists; deriving it from the thing
+// that actually serves the page is what makes the promise true.
+func (s *Server) nav(active string) []NavItem {
 	first := NavItem{Key: "overview", Label: "Fleet overview", Href: "/", Enabled: true}
-	if mode == ModeAgent {
+	if s.Mode == ModeAgent {
 		first.Label = "Overview"
 	}
 	items := []NavItem{
 		first,
-		{Key: "timeline", Label: "Timeline", Href: "/timeline", Enabled: true},
-		{Key: "findings", Label: "Findings triage", Href: "/findings", Enabled: true},
-		{Key: "block", Label: "Install block", Href: "/sessions", Enabled: true},
+		{Key: "timeline", Label: "Timeline", Href: "/timeline", Enabled: s.Events != nil},
+		{Key: "findings", Label: "Findings triage", Href: "/findings", Enabled: s.Findings != nil},
+		{Key: "block", Label: "Install block", Href: "/sessions",
+			Enabled: s.Sessions != nil && s.SessionReport != nil},
 		{Key: "credentials", Label: "Credential rotation", Href: "/rotate"},
-		{Key: "inventory", Label: "Inventory", Href: "/inventory", Enabled: true},
-		// Pairing is a hub-only page: an agent has nothing to approve.
-		{Key: "pairing", Label: "Device pairing", Href: "/devices", Enabled: mode == ModeHub},
-		{Key: "search", Label: "Package search", Href: "/search", Enabled: mode == ModeHub},
+		{Key: "inventory", Label: "Inventory", Href: "/inventory",
+			Enabled: s.Inventory != nil && s.Ecosystems != nil},
+		{Key: "pairing", Label: "Device pairing", Href: "/devices", Enabled: s.Devices != nil},
+		{Key: "search", Label: "Package search", Href: "/search",
+			Enabled: s.SearchPackages != nil && s.InventoryCoverage != nil},
 		{Key: "settings", Label: "Settings", Href: "/settings"},
 		{Key: "quarantine", Label: "Quarantine", Href: "/quarantine"},
 	}
@@ -365,7 +374,7 @@ func (s *Server) render(w http.ResponseWriter, page, title, active string, data 
 		Identity:        s.identity(),
 		Connected:       s.connected(),
 		ConnectionLabel: s.connectionLabel(),
-		Nav:             nav(s.Mode, active),
+		Nav:             s.nav(active),
 		// Reached only through Auth.Require when a guard is configured, so a
 		// guard being present is the same fact as this viewer being signed in.
 		SignedIn: s.Auth != nil,

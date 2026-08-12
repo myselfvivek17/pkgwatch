@@ -329,6 +329,54 @@ func (h Hub) InventoryCoverage() (searched, notSearched []string, err error) {
 	return searched, notSearched, rows.Err()
 }
 
+// FleetFindings returns open findings across the whole fleet, worst first.
+//
+// No summary, no CVSS and no fix version: those live in the advisory bundle and
+// the hub does not carry one. The caller reports attached=false so the page
+// says the columns are unknown rather than leaving them blank, because a blank
+// fix column reads as "no fix exists" and that is the opposite of true.
+//
+// Read-only by construction. The agent is authoritative for its own findings
+// (§3.3) and sync is outbound-only, so there is no channel to write a triage
+// decision back down — which is why the page hides its ack and ignore controls
+// here rather than offering buttons that would silently do nothing.
+func (h Hub) FleetFindings(f FindingFilter) ([]Finding, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	query := `SELECT d.hostname, f.purl, f.advisory_id, f.score, f.tier, f.state, f.detected_at
+		FROM fleet_findings f JOIN devices d ON d.id = f.device_id
+		WHERE f.state NOT IN ('ignored','fixed')`
+	var args []any
+	if f.Tier != "" {
+		query += " AND f.tier = ?"
+		args = append(args, f.Tier)
+	}
+	query += " ORDER BY f.score DESC, d.hostname LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := h.DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Finding
+	for rows.Next() {
+		var finding Finding
+		var detected int64
+		if err := rows.Scan(&finding.Machine, &finding.PURL, &finding.AdvisoryID,
+			&finding.Score, &finding.Tier, &finding.State, &detected); err != nil {
+			return nil, err
+		}
+		finding.DetectedAt = time.Unix(detected, 0)
+		out = append(out, finding)
+	}
+	return out, rows.Err()
+}
+
 // FleetFindingCounts returns open findings per tier for one device.
 //
 // Ignored and fixed are excluded, matching the agent's own count, so the number

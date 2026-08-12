@@ -10,12 +10,17 @@
         {{range .TierOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
       </select>
     </label>
+    {{/* No fix filter without a bundle to judge it against. It would match
+         nothing and read as "nothing here is fixable", which is the opposite of
+         what an absent bundle means. */}}
+    {{if not .BundleMissing}}
     <label class="pw-filter">
       <span>show</span>
       <select name="fix" onchange="this.form.submit()">
         {{range .FixOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
       </select>
     </label>
+    {{end}}
     <noscript><button type="submit">apply</button></noscript>
   </form>
 
@@ -23,7 +28,8 @@
     <table class="pw-table">
       <thead>
         <tr>
-          <th>severity</th><th class="pw-num">score</th><th class="pw-num">cvss</th>
+          <th>severity</th>{{if $.Data.ShowMachine}}<th>machine</th>{{end}}
+          <th class="pw-num">score</th><th class="pw-num">cvss</th>
           <th>fix</th><th>package</th><th>advisory</th>{{if $.Data.CanTriage}}<th>triage</th>{{end}}
         </tr>
       </thead>
@@ -31,6 +37,7 @@
         {{range .Rows}}
         <tr{{if .Fixable}} class="pw-fixable"{{end}}>
           <td>{{template "severity-badge" .Badge}}</td>
+          {{if $.Data.ShowMachine}}<td>{{.Machine}}</td>{{end}}
           <td class="pw-num pw-mono{{if .Promoted}} pw-promoted{{end}}">{{.Score}}</td>
           <td class="pw-num pw-mono pw-dim">{{.CVSS}}</td>
           <td class="pw-mono">{{if .Fixable}}<span class="pw-fix">{{.Fix}}</span>{{else}}<span class="pw-dim">{{.Fix}}</span>{{end}}</td>

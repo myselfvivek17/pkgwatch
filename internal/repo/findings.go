@@ -38,6 +38,11 @@ type Finding struct {
 	// applied. Score is that number multiplied by scope and script factors, so
 	// the two differ routinely and showing only Score reads as a mistake.
 	BaseCVSS *float64
+
+	// Machine names the device a finding came from, and is set only on the hub.
+	// On an agent every finding is this machine's, and a column repeating the
+	// hostname on every row is a column that says nothing.
+	Machine string
 }
 
 // RecordFindings inserts findings that are not already known.

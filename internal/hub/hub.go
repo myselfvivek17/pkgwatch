@@ -136,6 +136,19 @@ func Run(ctx context.Context, cfg config.Config) error {
 	srv.Events = st.Repo.FleetEvents
 	srv.OldestEvent = st.Repo.OldestFleetEventAt
 
+	// Findings across the fleet, read-only. attached is false because the hub
+	// carries no advisory bundle: the page then says CVSS, summaries and fix
+	// versions are unknown rather than rendering them blank, which would read as
+	// "no fix exists".
+	//
+	// Acknowledge and Ignore stay nil deliberately. The agent is authoritative
+	// for its own findings (§3.3) and sync is outbound-only, so there is no
+	// channel to write a decision back down — buttons here would do nothing.
+	srv.Findings = func(f repo.FindingFilter) ([]repo.Finding, bool, error) {
+		rows, err := st.Repo.FleetFindings(f)
+		return rows, false, err
+	}
+
 	router := chi.NewRouter()
 	router.Get("/health", daemon.HealthHandler("hub", started, func() (bool, string) {
 		return st.DB.PingContext(ctx) == nil, ""
