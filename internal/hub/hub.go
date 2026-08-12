@@ -7,6 +7,7 @@ package hub
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -149,7 +150,30 @@ func Run(ctx context.Context, cfg config.Config) error {
 		return fmt.Errorf("hub listen: %w", err)
 	}
 	listenLabel = ln.Addr().String()
-	slog.Info("hub dashboard listening", "addr", listenLabel, "hostname", st.Hostname)
+
+	scheme := "http"
+	if cfg.Hub.TLSEnabled() {
+		cert, err := LoadOrCreateCert(cfg)
+		if err != nil {
+			return err
+		}
+		ln = tls.NewListener(ln, TLSConfig(cert))
+		scheme = "https"
+
+		// Printed at every start, not just the first. This is the string a
+		// person compares when pairing an agent, and having to go find a
+		// command to print it is how the comparison gets skipped.
+		slog.Info("hub certificate", "fingerprint", Fingerprint(cert.Certificate[0]))
+	} else {
+		// Said plainly. The dashboard password crosses the network in a
+		// plaintext form POST with this off, to a listener the whole LAN can
+		// reach — and nothing else about the hub looks any different.
+		slog.Warn("TLS is OFF — the dashboard password will cross the network in the clear; " +
+			"remove `tls = false` from the [hub] config to turn it back on")
+	}
+
+	slog.Info("hub dashboard listening",
+		"url", scheme+"://"+listenLabel, "hostname", st.Hostname)
 
 	return daemon.Serve(ctx, &http.Server{
 		Handler:           router,

@@ -27,19 +27,19 @@ import (
 
 // State is an opened agent database plus whatever the advisory bundle told us.
 type State struct {
-	DB              *sql.DB
-	Repo            repo.Agent
-	BundleAttached  bool
-	Bundle          repo.BundleInfo
-	Paired          bool
-	HubURL          string
+	DB             *sql.DB
+	Repo           repo.Agent
+	BundleAttached bool
+	Bundle         repo.BundleInfo
+	Paired         bool
+	HubURL         string
 
 	// RevokedAt is when the hub last refused this device outright. Carried
 	// separately from Paired because "paired and refused" is its own state: the
 	// agent still gates and still scans, and it is reporting to nobody. An
 	// agent that showed only "paired" there would look healthy while silent.
-	RevokedAt string
-	LastSync  string
+	RevokedAt       string
+	LastSync        string
 	Hostname        string
 	AdvisoryDBPath  string
 	warnBundleError error

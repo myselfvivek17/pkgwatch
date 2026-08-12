@@ -59,7 +59,19 @@ func pairCmd() *cobra.Command {
 				return err
 			}
 
-			client := &fleet.Client{BaseURL: hubURL, Identity: id}
+			// An empty --fingerprint means trust on first use: the certificate
+			// presented now is recorded and printed for comparison. Supplying
+			// one is strictly better — it is checked during the handshake, so a
+			// machine in the middle never gets to see the pairing code.
+			expected, _ := cmd.Flags().GetString("fingerprint")
+			client := &fleet.Client{BaseURL: hubURL, Identity: id, Fingerprint: expected}
+
+			if !strings.HasPrefix(hubURL, "https://") {
+				fmt.Fprintln(cmd.ErrOrStderr(),
+					"WARNING: pairing over http. The pairing code and device token cross the\n"+
+						"network in the clear, and there is no certificate to pin.")
+			}
+
 			resp, err := client.Enroll(fleet.EnrollRequest{
 				DeviceID:  id.ID(),
 				PublicKey: device.EncodePublic(id.Public),
@@ -74,11 +86,16 @@ func pairCmd() *cobra.Command {
 				return err
 			}
 
+			// The fingerprint is written in the same step as the token, and
+			// deliberately so. An agent that has a token but no pin would
+			// accept any certificate on every later request, which is the
+			// failure that looks exactly like success.
 			for key, value := range map[string]string{
 				repo.HubDeviceKey: id.Encode(),
 				repo.HubDeviceID:  resp.DeviceID,
 				repo.HubToken:     resp.Token,
 				repo.HubURL:       strings.TrimRight(hubURL, "/"),
+				repo.HubCertFP:    client.SeenFingerprint,
 			} {
 				if err := st.Repo.SetHubState(key, value); err != nil {
 					return fmt.Errorf("store pairing: %w", err)
@@ -88,15 +105,31 @@ func pairCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			fmt.Fprintf(out, "Enrolled with %s.\n\n", hubURL)
 			fmt.Fprintf(out, "  device ID   %s\n", resp.DeviceID)
+			if client.SeenFingerprint != "" {
+				fmt.Fprintf(out, "  hub cert    %s\n", client.SeenFingerprint)
+			}
 			fmt.Fprintf(out, "  status      %s\n\n", resp.Status)
 			fmt.Fprintf(out, "Approve it on the hub:\n\n    pkgwatch hub devices approve %s\n\n", resp.DeviceID)
-			fmt.Fprintf(out, "Check that the ID above matches the one the hub lists before approving.\n")
-			fmt.Fprintf(out, "Nothing syncs until it is approved. This agent gates installs either way.\n")
+
+			// Two things to compare, printed together. Both are the same shape
+			// on purpose, and both are worthless if only one is checked.
+			fmt.Fprintf(out, "Before approving, check BOTH against the hub:\n")
+			fmt.Fprintf(out, "  · the device ID, against `pkgwatch hub devices list`\n")
+			if client.SeenFingerprint != "" {
+				if expected != "" {
+					fmt.Fprintf(out, "  · the certificate, already verified against the --fingerprint you passed\n")
+				} else {
+					fmt.Fprintf(out, "  · the certificate, against `pkgwatch hub fingerprint`\n")
+				}
+			}
+			fmt.Fprintf(out, "\nNothing syncs until it is approved. This agent gates installs either way.\n")
 			return nil
 		},
 	}
 	cmd.Flags().String("hub", "", "hub base URL, e.g. https://homelab:4875")
 	cmd.Flags().String("code", "", "pairing code from `pkgwatch hub pair-code`")
+	cmd.Flags().String("fingerprint", "",
+		"hub certificate fingerprint from `pkgwatch hub fingerprint`; without it the certificate presented now is trusted and printed for you to compare")
 	return cmd
 }
 
@@ -163,6 +196,36 @@ func pairCodeCmd() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(),
 				"\n    %s\n\nGood for %s, once. On the agent:\n\n    pkgwatch agent pair --hub <url> --code %s\n\n",
 				code, repo.PairCodeTTL, code)
+			return nil
+		},
+	}
+}
+
+// fingerprintCmd prints what an agent should be pinning.
+//
+// A separate command as well as a startup log line, because the person pairing
+// an agent is usually not the person watching the hub's journal.
+func fingerprintCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "fingerprint",
+		Short: "Print this hub's certificate fingerprint",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				return err
+			}
+			if !cfg.Hub.TLSEnabled() {
+				return errors.New("TLS is off for this hub, so there is no certificate to pin — " +
+					"remove `tls = false` from the [hub] config")
+			}
+			cert, err := hub.LoadOrCreateCert(cfg)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(),
+				"\n    %s\n\nCompare this with what `pkgwatch agent pair` prints on the machine\nbeing paired. They must match exactly.\n",
+				hub.Fingerprint(cert.Certificate[0]))
 			return nil
 		},
 	}

@@ -3,6 +3,7 @@ package fleet
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,9 +19,24 @@ type Client struct {
 	Token    string
 	Identity device.Identity
 
+	// Fingerprint is the hub certificate pinned at pairing. Empty means first
+	// contact: the certificate is accepted and recorded in SeenFingerprint for
+	// a person to compare, which is the only moment that trust is established.
+	//
+	// After pairing this is never empty in normal operation. An agent that lost
+	// it would silently accept any certificate, so `agent pair` writes it in
+	// the same step that writes the token.
+	Fingerprint string
+
+	// SeenFingerprint is what the hub actually presented on the last request.
+	SeenFingerprint string
+
 	HTTP *http.Client
 	Now  func() time.Time
 }
+
+// usesTLS reports whether this client will speak https.
+func (c *Client) usesTLS() bool { return strings.HasPrefix(c.BaseURL, "https://") }
 
 func (c *Client) now() time.Time {
 	if c.Now != nil {
@@ -33,7 +49,13 @@ func (c *Client) client() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	if !c.usesTLS() {
+		return &http.Client{Timeout: 30 * time.Second}
+	}
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: pinnedTransport(c.Fingerprint, &c.SeenFingerprint),
+	}
 }
 
 // APIError is a refusal the hub explained.
@@ -86,6 +108,13 @@ func (c *Client) post(path string, in, out any) error {
 
 	resp, err := c.client().Do(req)
 	if err != nil {
+		// A pin mismatch travels out intact rather than wrapped into "could not
+		// reach the hub". They are opposite situations: one means the hub is
+		// down, the other means something is answering in its place.
+		var wrongCert ErrWrongCertificate
+		if errors.As(err, &wrongCert) {
+			return wrongCert
+		}
 		return fmt.Errorf("reach hub at %s: %w", c.BaseURL, err)
 	}
 	defer resp.Body.Close()

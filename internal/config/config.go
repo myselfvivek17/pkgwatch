@@ -123,7 +123,24 @@ type HubConfig struct {
 	// UI deletes files and approves package installs — unauthenticated on a LAN
 	// it is a remote code execution primitive, so startup refuses without it (§8).
 	PasswordHash string `toml:"password_hash"`
+
+	// TLS is on by default, and turning it off puts the dashboard password on
+	// the wire in a plaintext form POST to a listener the whole LAN can reach.
+	//
+	// A pointer so "unset" is distinguishable from "explicitly false": the
+	// default has to be on, and a zero-value bool cannot express that.
+	TLS *bool `toml:"tls"`
+
+	// TLSCert and TLSKey point at a real certificate if there is one. Left
+	// empty, the hub generates a self-signed pair into the data directory on
+	// first run — agents pin whatever is presented at pairing either way, so
+	// this is about what a browser says, not about the sync protocol.
+	TLSCert string `toml:"tls_cert"`
+	TLSKey  string `toml:"tls_key"`
 }
+
+// TLSEnabled reports whether the hub should serve https. Default on.
+func (h HubConfig) TLSEnabled() bool { return h.TLS == nil || *h.TLS }
 
 func Default() Config {
 	return Config{

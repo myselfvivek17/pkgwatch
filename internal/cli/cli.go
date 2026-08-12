@@ -125,7 +125,7 @@ func hubCmd() *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(pairCodeCmd(), setPasswordCmd(), devicesCmd())
+	cmd.AddCommand(pairCodeCmd(), setPasswordCmd(), fingerprintCmd(), devicesCmd())
 	return cmd
 }
 

@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/myselfvivek17/pkgwatch/internal/buildinfo"
@@ -202,6 +204,26 @@ func syncOnce(cfg config.Config) syncOutcome {
 // handlePushError decides whether to retry, and records the refusals a person
 // has to act on.
 func handlePushError(store repo.Agent, err error, now time.Time) syncOutcome {
+	// A pin mismatch is not a network problem and must not be filed as one.
+	// "The hub is down" and "something is answering for the hub" are opposite
+	// situations, and only one of them is routine.
+	var wrongCert fleet.ErrWrongCertificate
+	if errors.As(err, &wrongCert) {
+		slog.Error("REFUSING to sync: the hub's certificate does not match the one pinned at pairing",
+			"pinned", wrongCert.Expected, "presented", wrongCert.Got)
+		if err := store.RecordEvent(repo.EventSyncRefused, "critical", "", "",
+			map[string]any{
+				"reason":    "certificate_mismatch",
+				"pinned":    wrongCert.Expected,
+				"presented": wrongCert.Got,
+			}, now); err != nil {
+			slog.Warn("could not record the certificate mismatch", "error", err)
+		}
+		// Halted rather than retried. Retrying would hand the same credentials
+		// to whatever is on the other end, once every thirty seconds.
+		return syncHalted
+	}
+
 	var apiErr fleet.APIError
 	if !errors.As(err, &apiErr) {
 		// A network error. Normal, and not worth an event every thirty seconds —
@@ -268,5 +290,22 @@ func clientFor(store repo.Agent) (*fleet.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &fleet.Client{BaseURL: hubURL, Token: token, Identity: id}, nil
+
+	fingerprint, err := store.HubState(repo.HubCertFP)
+	if err != nil {
+		return nil, err
+	}
+	// An https hub with no pin on file is refused rather than trusted. It means
+	// the pairing predates pinning, or the row was lost — and an agent that
+	// carried on would accept any certificate at all while looking healthy,
+	// which is worse than not syncing.
+	if strings.HasPrefix(hubURL, "https://") && fingerprint == "" {
+		return nil, fmt.Errorf(
+			"no hub certificate is pinned for %s — run `pkgwatch agent unpair` and pair again "+
+				"so the certificate can be recorded", hubURL)
+	}
+
+	return &fleet.Client{
+		BaseURL: hubURL, Token: token, Identity: id, Fingerprint: fingerprint,
+	}, nil
 }
