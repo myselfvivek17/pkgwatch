@@ -73,9 +73,13 @@ var kindLabels = map[string]string{
 	repo.EventScan:            "scan",
 	repo.EventFeedSync:        "bundle sync",
 	repo.EventFindingNew:      "new finding",
+	repo.EventFindingBack:     "finding back",
+	repo.EventFindingFixed:    "finding closed",
 	repo.EventInstallBlocked:  "install blocked",
 	repo.EventGateDegraded:    "gate degraded",
 	repo.EventPackageFiltered: "version withheld",
+	repo.EventSyncDropped:     "queue trimmed",
+	repo.EventSyncRefused:     "sync refused",
 }
 
 // buildRow turns a stored event into a display row.
@@ -146,12 +150,44 @@ func summarise(e repo.Event) string {
 		// Never softened. This is the gate allowing an install it could not
 		// evaluate, which is the one failure that cannot be found afterwards.
 		return "allowed without evaluation — " + e.Detail["detail"]
+
+	case repo.EventFindingNew, repo.EventFindingBack:
+		// The advisory leads, because it is the part that varies. One package
+		// routinely carries several advisories, and a row showing only the purl
+		// renders them as three identical lines — which reads as a duplication
+		// bug rather than as three different problems.
+		if e.AdvisoryID != "" {
+			return e.AdvisoryID + " · " + e.PURL
+		}
+		return e.PURL
+
+	case repo.EventFindingFixed:
+		return countSummary(e, "closed")
+	case repo.EventSyncDropped:
+		return e.Detail["dropped"] + " event(s) never sent — the outbound queue hit its cap"
+	case repo.EventSyncRefused:
+		return "the hub refused this device: " + e.Detail["reason"]
+
 	default:
 		if e.PURL != "" {
 			return e.PURL
 		}
 		return e.Kind
 	}
+}
+
+// countSummary describes a batch event: how many, and of what.
+func countSummary(e repo.Event, verb string) string {
+	parts := []string{e.Detail["count"] + " " + verb}
+	for _, tier := range repo.Tiers {
+		if n := e.Detail[tier]; n != "" && n != "0" {
+			parts = append(parts, n+" "+tier)
+		}
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return parts[0] + " · " + strings.Join(parts[1:], ", ")
 }
 
 // group folds rows into day headings, newest day first.

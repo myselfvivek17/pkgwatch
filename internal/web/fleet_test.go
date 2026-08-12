@@ -56,7 +56,10 @@ func TestASilentMachineShowsNoFindingCounts(t *testing.T) {
 		"AAAA-BBBB": {"critical": 4, "high": 9},
 	})
 
-	if strings.Contains(body, "×4") || strings.Contains(body, "×9") {
+	// Asserted on the element rather than on the rendered digits: "4" and "9"
+	// occur in timestamps and IDs, so a string match on the number alone would
+	// pass whatever the card did.
+	if strings.Contains(body, "pw-badge-count") {
 		t.Error("an offline machine is showing finding counts — those numbers describe a machine that may have been patched or compromised since")
 	}
 	if !strings.Contains(body, "NOT REPORTING") {
@@ -83,7 +86,7 @@ func TestNeverReportedIsItsOwnState(t *testing.T) {
 	if strings.Contains(body, "gate on") {
 		t.Error("a machine that has never reported is rendered as healthy")
 	}
-	if !strings.Contains(body, "check the agent is running") {
+	if !strings.Contains(body, "agent is running") {
 		t.Error("the card does not say what to do about it")
 	}
 }
@@ -94,8 +97,14 @@ func TestAReportingMachineShowsItsFindings(t *testing.T) {
 		"EEEE-FFFF": {"critical": 2},
 	})
 
-	if !strings.Contains(body, "×2") {
-		t.Error("a reporting machine is not showing its findings")
+	// The count must sit inside the same element as its badge. As two flex
+	// siblings they wrapped independently, and a card could show "Medium" at the
+	// end of one line with "346" starting the next.
+	if !strings.Contains(body, `<span class="pw-badge-pair">`) {
+		t.Error("badge and count are not one element")
+	}
+	if !strings.Contains(body, `class="pw-badge-count pw-mono">2<`) {
+		t.Error("a reporting machine is not showing its finding count")
 	}
 	if !strings.Contains(body, "gate on") {
 		t.Error("a reporting machine is not shown as gating")

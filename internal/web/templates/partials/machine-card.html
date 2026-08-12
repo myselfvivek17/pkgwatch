@@ -24,25 +24,35 @@
     {{end}}
   </div>
 
-  <div class="pw-machine-meta pw-mono">{{.Device.OS}}/{{.Device.Arch}} · {{.Device.ID}}</div>
+  {{/* The device ID gets its own line and never wraps. It exists to be compared
+       character for character against what `pkgwatch agent pair` printed on the
+       machine itself; broken across two lines, that comparison is the one thing
+       it cannot be used for. */}}
+  <div class="pw-machine-platform">{{.Device.OS}}/{{.Device.Arch}}</div>
+  <div class="pw-machine-id pw-mono" title="{{.Device.ID}}">{{.Device.ID}}</div>
 
   {{if .Reporting}}
     {{$tiers := .FindingTiers}}
     {{if $tiers}}
       <div class="pw-badge-row">
+        {{/* Badge and count are one element, not two siblings. As separate flex
+             children they wrapped independently, so a card could show "Medium"
+             at the end of one line and "×346" at the start of the next. */}}
         {{range $tiers}}
-          {{template "severity-badge" .}}
-          <span class="pw-badge-count pw-mono">×{{.Count}}</span>
+          <span class="pw-badge-pair">
+            {{template "severity-badge" .}}<span class="pw-badge-count pw-mono">{{.Count}}</span>
+          </span>
         {{end}}
       </div>
     {{end}}
-    <div class="pw-machine-note">last reported {{.Silence}} ago</div>
-  {{else if .NeverReported}}
-    <div class="pw-machine-silence">NEVER REPORTED</div>
-  {{else if .Device.Approved}}
-    <div class="pw-machine-silence">NOT REPORTING — {{.Silence}}</div>
+    <div class="pw-machine-note">last reported {{.Silence}} ago{{with .Note}} · {{.}}{{end}}</div>
+  {{else}}
+    {{if .NeverReported}}
+      <div class="pw-machine-silence">NEVER REPORTED</div>
+    {{else if .Device.Approved}}
+      <div class="pw-machine-silence">NOT REPORTING · {{.Silence}}</div>
+    {{end}}
+    <div class="pw-machine-note">{{.Note}}</div>
   {{end}}
-
-  <div class="pw-machine-note">{{.Note}}</div>
 </div>
 {{end}}

@@ -2,7 +2,27 @@
    every value already referenced a var(--…), the port to classes is mechanical. */
 
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); }
+
+/* Typography lives on body, not on .pw-root.
+   It was on .pw-root, which only exists in layout.html — so the login page,
+   which stands alone without it, rendered every element in the browser default
+   serif. A sign-in screen in Times New Roman is the first thing anyone sees of
+   this tool. Anything scoped to a container is a rule the next standalone page
+   silently misses. */
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Form controls do not inherit type by default on any browser. */
+input, button, select, textarea { font: inherit; }
+
 ::selection { background: rgba(120, 180, 190, 0.35); }
 
 .pw-root {
@@ -10,9 +30,6 @@ body { margin: 0; background: var(--bg); }
   height: 100vh;
   width: 100%;
   background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-sans);
-  font-size: 13px;
   overflow: hidden;
 }
 
@@ -155,14 +172,20 @@ body { margin: 0; background: var(--bg); }
 
 .pw-main { flex: 1; overflow-y: auto; overflow-x: hidden; background: var(--bg); min-width: 0; }
 
+/* 980px capped the whole page, which starved a card grid on a wide monitor:
+   three 295px cards in a 1708px area, every one of them wrapping its hostname
+   and its device ID, with 364px of nothing on either side. The line-length rule
+   belongs on prose, not on the container — .pw-muted carries it. */
 .pw-page {
-  max-width: 980px;
+  max-width: 1180px;
   margin: 0 auto;
   padding: 28px 32px 60px;
   animation: pw-fade-in 0.2s ease-out;
 }
 
-.pw-page-title { font-size: 19px; font-weight: 650; margin: 0 0 18px; letter-spacing: -0.01em; }
+.pw-page-title {
+  font-size: 21px; font-weight: 650; margin: 0 0 20px; letter-spacing: -0.015em;
+}
 
 .pw-section-title {
   font-size: 13px;
@@ -255,16 +278,30 @@ body { margin: 0; background: var(--bg); }
   background: var(--bg-elevated); margin-bottom: 5px;
   animation: pw-row-in 0.24s ease-out;
 }
+/* The kind column is sized to the longest label there is, and never wraps.
+   At 108px "VERSION WITHHELD" broke onto two lines, which then set the height
+   of every row in a run of them — one npm install writes dozens in a row, so a
+   single wrapped label doubled the height of the whole page. */
 .pw-row-head {
-  display: grid; grid-template-columns: 52px 108px 1fr auto;
-  gap: 12px; align-items: center;
-  padding: 10px 13px; cursor: pointer; list-style: none;
+  display: grid; grid-template-columns: 54px 132px minmax(0, 1fr) auto;
+  gap: 14px; align-items: baseline;
+  padding: 9px 14px; cursor: pointer; list-style: none;
 }
 .pw-row-head::-webkit-details-marker { display: none }
 .pw-row[data-flat] .pw-row-head { cursor: default }
-.pw-row-time { color: var(--text-faint); font-size: 11.5px; }
-.pw-row-kind { color: var(--text-dim); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
-.pw-row-summary { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.pw-row-time {
+  color: var(--text-faint); font-size: 11.5px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.pw-row-kind {
+  color: var(--text-dim); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* Package identifiers are long and have no spaces, so they need a break
+   opportunity — but anywhere is too greedy for prose summaries sharing the
+   column. break-word only splits a token that cannot fit on its own line. */
+.pw-row-summary { color: var(--text); font-size: 12.5px; overflow-wrap: break-word; }
 
 /* Routine: dimmer and tighter, per the design. */
 .pw-row-routine { background: transparent; border-color: transparent; margin-bottom: 0; }
@@ -376,42 +413,73 @@ body { margin: 0; background: var(--bg); }
 
 /* ---- fleet overview ------------------------------------------------------ */
 
-.pw-alert {
-  background: var(--sev-critical-bg-subtle);
-  border: 1px solid var(--sev-critical-bg);
-  border-radius: 7px; padding: 14px 16px; margin-bottom: 14px;
-}
-.pw-alert-title { font-weight: 650; font-size: 13.5px; color: var(--sev-critical-fg); margin-bottom: 8px; }
-.pw-alert-actions { display: flex; gap: 14px; font-size: 12px; flex-wrap: wrap; }
-.pw-alert-actions a { color: var(--accent); }
-.pw-alert-action.is-disabled { color: var(--text-faint); cursor: not-allowed; text-decoration: line-through; }
-
 .pw-fleet-summary {
-  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
-  padding: 10px 14px; margin-bottom: 16px;
+  padding: 13px 16px; margin-bottom: 18px;
   border: 1px solid var(--border); border-radius: 7px; background: var(--bg-elevated);
 }
-.pw-fleet-state { font-weight: 650; font-size: 13.5px; }
-.pw-fleet-counts { font-size: 12px; color: var(--text-dim); }
-.pw-fleet-summary.is-critical { border-color: var(--sev-critical-bg); }
+.pw-fleet-line { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.pw-fleet-state { font-weight: 650; font-size: 15px; letter-spacing: -0.01em; }
+.pw-fleet-counts { font-size: 12.5px; color: var(--text-dim); }
+.pw-fleet-detail {
+  display: flex; gap: 16px; flex-wrap: wrap; align-items: baseline;
+  margin-top: 9px; padding-top: 9px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px; color: var(--text-dim);
+}
+.pw-fleet-detail a { color: var(--accent); }
+.pw-fleet-action.is-disabled { color: var(--text-faint); cursor: not-allowed; }
+
+/* The severity of the whole fleet is carried by the state word and one border,
+   not by a filled red panel. A background that shouts on every visit is a
+   background nobody sees by the second week. */
+.pw-fleet-summary.is-critical {
+  border-color: var(--sev-critical-bg); background: var(--sev-critical-bg-subtle);
+}
 .pw-fleet-summary.is-critical .pw-fleet-state { color: var(--sev-critical-fg); }
 .pw-fleet-summary.is-warn { border-color: var(--sev-high-border); }
 .pw-fleet-summary.is-warn .pw-fleet-state { color: var(--sev-high-fg); }
 
+.pw-fleet-footnote { margin-top: 18px; }
+
+/* Cards wide enough to hold a 32-character device ID on one line, which is the
+   real constraint here: at 268px they were 295px wide and every card wrapped
+   both the ID and the hostname. */
 .pw-machines {
-  display: grid; gap: 12px;
-  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  display: grid; gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
 }
 .pw-machine {
   border: 1px solid var(--border); border-radius: 7px;
-  background: var(--bg-elevated); padding: 13px 15px;
+  background: var(--bg-elevated); padding: 15px 17px;
   animation: pw-fade-in 0.2s ease-out;
 }
-.pw-machine-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
-.pw-machine-name { font-weight: 650; font-size: 13.5px; }
-.pw-machine-meta { font-size: 10.5px; color: var(--text-faint); margin-bottom: 10px; overflow-wrap: anywhere; }
-.pw-machine-note { font-size: 11.5px; color: var(--text-dim); margin-top: 8px; }
-.pw-badge-count { font-size: 10.5px; color: var(--text-faint); margin-left: -6px; }
+.pw-machine-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 10px; margin-bottom: 3px;
+}
+.pw-machine-name {
+  font-weight: 650; font-size: 14px; letter-spacing: -0.01em;
+  /* Break between hyphenated segments rather than mid-token. */
+  overflow-wrap: break-word;
+}
+.pw-machine-platform { font-size: 11px; color: var(--text-faint); }
+
+/* Never wrapped, never truncated with an ellipsis. This is compared by eye
+   against the agent's own output, so a partial ID is worse than none — it looks
+   checkable and is not. If it ever exceeds the card, it scrolls. */
+.pw-machine-id {
+  font-size: 10.5px; color: var(--text-faint);
+  white-space: nowrap; overflow-x: auto; overscroll-behavior-x: contain;
+  margin: 3px 0 12px; padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.pw-machine-id::-webkit-scrollbar { display: none; }
+
+.pw-machine-note { font-size: 11.5px; color: var(--text-dim); margin-top: 10px; }
+
+/* One unit. As two flex siblings the count wrapped away from its badge. */
+.pw-badge-pair { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.pw-badge-count { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
 .pw-gate { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
 .pw-gate.is-on { color: var(--text-dim); display: inline-flex; align-items: center; gap: 5px; }

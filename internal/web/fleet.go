@@ -74,20 +74,24 @@ func (m Machine) FindingTiers() []Badge {
 // numbers it sent describe a machine that may have been patched, compromised or
 // switched off since, and presenting them as current is the failure this whole
 // project keeps finding.
+//
+// Empty for a healthy machine that has findings: the badges above it already
+// say everything, and "reporting" underneath a line reading "last reported 3m
+// ago" is the same fact twice.
 func (m Machine) Note() string {
 	switch {
 	case m.Pending():
-		return "enrolled but not approved — nothing from this machine is being accepted"
+		return "enrolled, not approved. Nothing from this machine is being accepted."
 	case m.Revoked():
-		return "revoked — it is still gating installs locally, and reporting to nobody"
+		return "revoked. Still gating installs locally, reporting to nobody."
 	case m.NeverReported():
-		return "approved but has never reported — check the agent is running on that machine"
+		return "approved but never reported. Check the agent is running there."
 	case !m.Reporting():
 		return "gate status unknown while offline"
 	case len(m.FindingTiers()) == 0:
-		return "reporting, no open findings"
+		return "no open findings"
 	default:
-		return "reporting"
+		return ""
 	}
 }
 

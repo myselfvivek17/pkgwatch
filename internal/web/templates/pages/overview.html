@@ -35,7 +35,11 @@
     {{if .HasFindings}}
       <div class="pw-badge-row">
         {{range .FindingTiers}}
-          {{if .Count}}{{template "severity-badge" .}} <span class="pw-mono" style="color:var(--text-faint);font-size:10.5px">×{{.Count}}</span>{{end}}
+          {{if .Count}}
+            <span class="pw-badge-pair">
+              {{template "severity-badge" .}}<span class="pw-badge-count pw-mono">{{.Count}}</span>
+            </span>
+          {{end}}
         {{end}}
       </div>
     {{else}}

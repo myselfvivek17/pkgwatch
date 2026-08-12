@@ -12,31 +12,30 @@
         <code class="pw-mono">pkgwatch agent pair</code> on the machine.
       </p>
       <p class="pw-muted">
-        This says nothing about whether those machines are clean — an unpaired agent
+        This says nothing about whether those machines are clean. An unpaired agent
         still gates and still scans, it just does not report here.
       </p>
     </div>
   {{else}}
 
-  {{if .Critical}}
-  <div class="pw-alert">
-    <div class="pw-alert-title">
-      {{.Critical}} machine{{if ne .Critical 1}}s{{end}} with critical findings
-    </div>
-    <div class="pw-alert-actions">
-      <a href="/findings?tier=critical">View findings</a>
-      <span class="pw-alert-action is-disabled" title="Not built yet — lands in M6">Start credential rotation</span>
-    </div>
-  </div>
-  {{end}}
-
+  {{/* One status bar, not two. A red banner reading "2 machines with critical
+       findings" stacked above a red bar reading "Needs attention now" is the
+       same alarm twice, and two competing red boxes read as noise rather than
+       as urgency. */}}
   <div class="pw-fleet-summary {{.StateClass}}">
-    <span class="pw-fleet-state">{{.State}}</span>
-    <span class="pw-fleet-counts">
-      {{.Reporting}} reporting
-      {{if .Unreporting}}· <strong>{{.Unreporting}} not reporting</strong>{{end}}
-      {{if .Waiting}}· {{.Waiting}} waiting for approval{{end}}
-    </span>
+    <div class="pw-fleet-line">
+      <span class="pw-fleet-state">{{.State}}</span>
+      <span class="pw-fleet-counts">
+        {{.Reporting}} reporting{{if .Unreporting}} · <strong>{{.Unreporting}} not reporting</strong>{{end}}{{if .Waiting}} · {{.Waiting}} waiting for approval{{end}}
+      </span>
+    </div>
+    {{if .Critical}}
+    <div class="pw-fleet-detail">
+      <span>{{.Critical}} machine{{if ne .Critical 1}}s{{end}} with critical findings.</span>
+      <a href="/findings?tier=critical">View findings</a>
+      <span class="pw-fleet-action is-disabled" title="Not built yet, lands in M6">Start credential rotation</span>
+    </div>
+    {{end}}
   </div>
 
   <div class="pw-machines">
@@ -45,11 +44,18 @@
     {{end}}
   </div>
 
-  <p class="pw-muted" style="margin-top:18px">
-    A machine that has stopped reporting shows no finding counts at all. The last numbers
-    it sent describe a machine that may have been patched, compromised or switched off
-    since — presenting them as current would be worse than showing nothing.
+  {{/* Shown only when a machine is actually silent. Standing prose explaining
+       what an offline card means is noise on a fleet where every machine is
+       reporting, and the sentence stops being read long before the day it
+       matters. */}}
+  {{if .Unreporting}}
+  <p class="pw-muted pw-fleet-footnote">
+    A machine that has stopped reporting shows no finding counts at all. The last
+    numbers it sent describe a machine that may have been patched, compromised or
+    switched off since, so presenting them as current would be worse than showing
+    nothing.
   </p>
+  {{end}}
   {{end}}
   {{end}}
 </div>
