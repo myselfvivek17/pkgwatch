@@ -136,7 +136,10 @@ func hubCmd() *cobra.Command {
 		stub("revoke <id>", "Revoke a device's token", "M5", cobra.ExactArgs(1)),
 	)
 
-	cmd.AddCommand(stub("pair-code", "Generate a single-use pairing code", "M5", cobra.NoArgs), devices)
+	cmd.AddCommand(
+		stub("pair-code", "Generate a single-use pairing code", "M5", cobra.NoArgs),
+		setPasswordCmd(),
+		devices)
 	return cmd
 }
 

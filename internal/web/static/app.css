@@ -355,3 +355,47 @@ body { margin: 0; background: var(--bg); }
 /* Deliberately not styled as success: an unfinished session is one whose
    outcome was never written, which is not the same as a clean one. */
 .pw-outcome-unfinished { border-style: dashed; }
+
+.pw-signout { margin-top: 6px; }
+.pw-signout button {
+  background: none; border: none; padding: 0;
+  font: inherit; font-size: 11px; color: var(--text-faint);
+  cursor: pointer; text-decoration: underline;
+}
+.pw-signout button:hover { color: var(--text-dim); }
+
+/* ---- hub sign-in --------------------------------------------------------- */
+
+.pw-login-body { background: var(--bg); color: var(--text); }
+.pw-login {
+  max-width: 360px;
+  margin: 12vh auto 0;
+  padding: 0 24px;
+  animation: pw-fade-in 0.2s ease-out;
+}
+.pw-login .pw-brand { margin-bottom: 22px; }
+
+.pw-login-form { display: grid; gap: 8px; margin-bottom: 22px; }
+.pw-login-form label {
+  font-size: 10.5px; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.pw-login-form input, .pw-login-form button {
+  background: var(--bg-sunken); color: var(--text);
+  border: 1px solid var(--border); border-radius: 5px;
+  padding: 7px 9px; font: inherit; font-size: 13px;
+}
+.pw-login-form input:focus-visible, .pw-login-form button:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.pw-login-form button {
+  background: var(--accent); color: var(--accent-fg);
+  border-color: var(--accent); font-weight: 600; cursor: pointer;
+}
+
+/* Announced, not just coloured — a wrong password reported only by turning a
+   line red is silent to a screen reader, and the form gives no other feedback. */
+.pw-login-problem {
+  margin: 2px 0 0; font-size: 12px;
+  color: var(--sev-high-fg);
+}

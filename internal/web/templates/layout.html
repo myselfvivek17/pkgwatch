@@ -64,6 +64,11 @@
         </svg>
         <span class="pw-theme-label-dark">dark</span><span class="pw-theme-label-light">light</span>
       </button>
+      {{if .SignedIn}}
+      <form method="post" action="/logout" class="pw-signout">
+        <button type="submit">Sign out</button>
+      </form>
+      {{end}}
     </div>
   </aside>
 

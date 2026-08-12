@@ -148,16 +148,28 @@ func Run(handle *sql.DB, store repo.Agent, bundle repo.BundleInfo, now time.Time
 		}
 	}
 
-	if report.Resolved, err = store.ResolveFindingsForGonePackages(now); err != nil {
+	closed, err := store.ResolveFindingsForGonePackages(now)
+	if err != nil {
 		return report, err
 	}
+	report.Resolved = len(closed)
 	// After closing, reopen: a package can come back — a stopped container
 	// started again, a package reinstalled — and RecordFindings above would have
 	// silently absorbed it, since the finding row already exists in the fixed
 	// state. Ordering matters only in that both run every pass.
-	if report.Reopened, err = store.ReopenFindingsForPresentPackages(); err != nil {
+	reopened, err := store.ReopenFindingsForPresentPackages()
+	if err != nil {
 		return report, err
 	}
+	report.Reopened = len(reopened)
+
+	// Both transitions get a timeline row. Neither had one before, so a machine
+	// whose findings dropped from 116 to 18 overnight showed the new number and
+	// no account of where the other 98 went — and the reopen direction matters
+	// more, because that is a vulnerability coming back into view during a pass
+	// nobody was watching.
+	recordChangeEvent(store, repo.EventFindingFixed, closed, now)
+	recordChangeEvent(store, repo.EventFindingBack, reopened, now)
 
 	// An ignore with an expiry that nothing enforces is a permanent ignore with
 	// extra steps. This runs on every pass so "hide it for a week" comes back
@@ -196,6 +208,29 @@ func recordFindingEvents(store repo.Agent, findings []repo.Finding, now time.Tim
 			}, now); err != nil {
 			slog.Warn("watch: could not record finding event", "purl", finding.PURL, "error", err)
 		}
+	}
+}
+
+// recordChangeEvent posts one summary row for a batch of state changes.
+//
+// Deliberately one row per pass rather than one per finding. Stopping two
+// containers retired 322 packages at once; 322 timeline rows saying the same
+// thing would bury the day they landed on, and the design's timeline is meant
+// to be read. The count and the per-tier breakdown are the facts worth having,
+// and the findings page is where the individual rows already live.
+//
+// Filed under the worst tier present, so a critical returning gets the critical
+// row treatment rather than being averaged away by fifty lows alongside it.
+func recordChangeEvent(store repo.Agent, kind string, changes []repo.FindingChange, now time.Time) {
+	if len(changes) == 0 {
+		return
+	}
+	detail := map[string]any{"count": len(changes)}
+	for tier, n := range repo.TierCounts(changes) {
+		detail[tier] = n
+	}
+	if err := store.RecordEvent(kind, repo.WorstTier(changes), "", "", detail, now); err != nil {
+		slog.Warn("watch: could not record finding change event", "kind", kind, "error", err)
 	}
 }
 

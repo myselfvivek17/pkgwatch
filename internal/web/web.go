@@ -70,6 +70,7 @@ type Page struct {
 	Connected       bool
 	ConnectionLabel string
 	Nav             []NavItem
+	SignedIn        bool
 	Data            any
 }
 
@@ -88,6 +89,12 @@ type Server struct {
 	// On a hub it names the hub itself.
 	HubLabel string
 	Paired   bool
+
+	// Auth guards every page when set. Nil means no sign-in, which is only
+	// correct for a dashboard bound to loopback — the hub refuses to start on a
+	// routable address without a password (§8), and this is what enforces it on
+	// each request rather than once at startup.
+	Auth *Auth
 
 	Overview func() (OverviewData, error)
 
@@ -214,32 +221,56 @@ func New(mode Mode, hostname string) (*Server, error) {
 		}
 		s.templates[page] = tpl
 	}
+
+	// The login page stands alone — no layout, because every nav link on it
+	// would lead somewhere the caller cannot reach.
+	login, err := template.ParseFS(assets, "templates/login.html")
+	if err != nil {
+		return nil, fmt.Errorf("parse login: %w", err)
+	}
+	s.templates["login"] = login
 	return s, nil
 }
 
 // Routes mounts the shell onto r. The /static/* wildcard is chi syntax — chi
 // patterns are exact matches unless a wildcard says otherwise.
 func (s *Server) Routes(r chi.Router) {
+	// Static assets stay outside the guard: the login page needs its stylesheet,
+	// and nothing under /static is a fact about this fleet.
 	r.Handle("/static/*", http.FileServer(http.FS(assets)))
-	r.Get("/", s.handleOverview)
-	r.Get("/design", s.handleDesign)
-	if s.Events != nil {
-		r.Get("/timeline", s.handleTimeline)
-		r.Get("/events/stream", s.handleStream)
+	if s.Auth != nil {
+		r.Get("/login", s.handleLogin)
+		r.Post("/login", s.handleLogin)
+		r.Post("/logout", guard(s.handleLogout))
 	}
-	if s.Inventory != nil && s.Ecosystems != nil {
-		r.Get("/inventory", s.handleInventory)
-	}
-	if s.Sessions != nil && s.SessionReport != nil {
-		r.Get("/sessions", s.handleSessions)
-		r.Get("/sessions/{id}", s.handleSessionReport)
-	}
-	if s.Findings != nil {
-		r.Get("/findings", s.handleFindings)
-		if s.Acknowledge != nil && s.Ignore != nil {
-			r.Post("/findings/triage", guard(s.handleTriage))
+
+	// Group rather than r.Use: chi refuses middleware added after routes exist,
+	// and /health is already mounted by the time we get here — deliberately, so
+	// the service manager can watch it without a session.
+	r.Group(func(r chi.Router) {
+		if s.Auth != nil {
+			r.Use(s.Auth.Require)
 		}
-	}
+		r.Get("/", s.handleOverview)
+		r.Get("/design", s.handleDesign)
+		if s.Events != nil {
+			r.Get("/timeline", s.handleTimeline)
+			r.Get("/events/stream", s.handleStream)
+		}
+		if s.Inventory != nil && s.Ecosystems != nil {
+			r.Get("/inventory", s.handleInventory)
+		}
+		if s.Sessions != nil && s.SessionReport != nil {
+			r.Get("/sessions", s.handleSessions)
+			r.Get("/sessions/{id}", s.handleSessionReport)
+		}
+		if s.Findings != nil {
+			r.Get("/findings", s.handleFindings)
+			if s.Acknowledge != nil && s.Ignore != nil {
+				r.Post("/findings/triage", guard(s.handleTriage))
+			}
+		}
+	})
 }
 
 // renderPartial renders one partial on its own, for the live stream to push
@@ -310,7 +341,10 @@ func (s *Server) render(w http.ResponseWriter, page, title, active string, data 
 		Connected:       s.connected(),
 		ConnectionLabel: s.connectionLabel(),
 		Nav:             nav(s.Mode, active),
-		Data:            data,
+		// Reached only through Auth.Require when a guard is configured, so a
+		// guard being present is the same fact as this viewer being signed in.
+		SignedIn: s.Auth != nil,
+		Data:     data,
 	}); err != nil {
 		// Headers are already sent by now, so there is nothing useful to send
 		// the browser; the daemon's logger picks this up via the http.Server.

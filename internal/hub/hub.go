@@ -88,6 +88,18 @@ func Run(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 
+	// CheckBind above refuses to start a routable hub without a password. That
+	// is only worth anything if something then verifies it on every request —
+	// this is that. A loopback hub with no password configured runs open, the
+	// same as the agent's own dashboard.
+	if cfg.Hub.PasswordHash != "" {
+		key, err := st.Repo.SessionKey()
+		if err != nil {
+			return err
+		}
+		srv.Auth = &web.Auth{PasswordHash: cfg.Hub.PasswordHash, Key: key}
+	}
+
 	started := time.Now()
 	listenLabel := ""
 

@@ -14,6 +14,14 @@ const (
 	EventFeedSync    = "feed_sync"
 	EventFindingNew  = "finding_new"
 	EventFindingBack = "finding_reopened"
+
+	// EventFindingFixed is a finding closing because its package went away.
+	//
+	// Neither this nor EventFindingBack counts as routine. They are unattended
+	// state changes with no person behind them, so the timeline is the only
+	// place they are ever visible — filing them under the "machinery ran" rule
+	// would dim the one row that says a vulnerability came back.
+	EventFindingFixed = "finding_fixed"
 )
 
 // routineKinds are the events that say the machinery ran, not that something

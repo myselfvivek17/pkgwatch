@@ -112,15 +112,73 @@ func (a Agent) HasFindings() (bool, error) {
 // Uninstalling is a fix. Leaving the finding open would keep a machine looking
 // dirty for something it no longer has, and an ignored one stays ignored
 // because that was a deliberate decision about a package, not about its state.
-func (a Agent) ResolveFindingsForGonePackages(at time.Time) (int, error) {
-	result, err := a.DB.Exec(`UPDATE findings SET state = ?
+func (a Agent) ResolveFindingsForGonePackages(at time.Time) ([]FindingChange, error) {
+	return a.changed(`UPDATE findings SET state = ?
 		WHERE state NOT IN (?, ?)
-		  AND purl IN (SELECT purl FROM packages WHERE gone_at IS NOT NULL)`,
+		  AND purl IN (SELECT purl FROM packages WHERE gone_at IS NOT NULL)
+		RETURNING purl, advisory_id, tier`,
 		StateFixed, StateIgnored, StateFixed)
+}
+
+// FindingChange is one finding whose state moved on its own — closed because
+// its package went away, or reopened because the package came back.
+//
+// Returned rather than counted because these are the two transitions nothing
+// else records. Every other state change has a person behind it and a timeline
+// row already; these happen during an unattended pass, and a count alone cannot
+// say what closed or how bad it was.
+type FindingChange struct {
+	PURL       string
+	AdvisoryID string
+	Tier       string
+}
+
+// changed runs an UPDATE ... RETURNING and collects the rows it touched.
+//
+// RETURNING rather than SELECT-then-UPDATE: the two-query version can report a
+// row it did not actually change, and the whole point here is to describe what
+// happened rather than what was about to.
+func (a Agent) changed(query string, args ...any) ([]FindingChange, error) {
+	rows, err := a.DB.Query(query, args...)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return rowsAffected(result), nil
+	defer rows.Close()
+
+	var out []FindingChange
+	for rows.Next() {
+		var c FindingChange
+		if err := rows.Scan(&c.PURL, &c.AdvisoryID, &c.Tier); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// WorstTier returns the most severe tier among changes, or "" for none. It is
+// what a summary event is filed under, so a critical coming back gets the
+// timeline's critical treatment instead of being averaged into a quiet row.
+func WorstTier(changes []FindingChange) string {
+	seen := map[string]bool{}
+	for _, c := range changes {
+		seen[c.Tier] = true
+	}
+	for _, tier := range Tiers {
+		if seen[tier] {
+			return tier
+		}
+	}
+	return ""
+}
+
+// TierCounts breaks changes down for a summary event's detail.
+func TierCounts(changes []FindingChange) map[string]int {
+	counts := map[string]int{}
+	for _, c := range changes {
+		counts[c.Tier]++
+	}
+	return counts
 }
 
 // ReopenFindingsForPresentPackages undoes a close when the package comes back.
@@ -148,16 +206,13 @@ func (a Agent) ResolveFindingsForGonePackages(at time.Time) (int, error) {
 // Keyed on score rather than tier, like the baseline rule: whether something is
 // worth announcing is a triage question and install context belongs in it,
 // while the tier says how bad the advisory is.
-func (a Agent) ReopenFindingsForPresentPackages() (int, error) {
-	result, err := a.DB.Exec(`UPDATE findings
+func (a Agent) ReopenFindingsForPresentPackages() ([]FindingChange, error) {
+	return a.changed(`UPDATE findings
 		SET state = CASE WHEN score >= ? THEN ? ELSE ? END
 		WHERE state = ?
-		  AND purl IN (SELECT purl FROM packages WHERE gone_at IS NULL)`,
+		  AND purl IN (SELECT purl FROM packages WHERE gone_at IS NULL)
+		RETURNING purl, advisory_id, tier`,
 		AnnounceAbove, StateNew, StateAcknowledged, StateFixed)
-	if err != nil {
-		return 0, err
-	}
-	return rowsAffected(result), nil
 }
 
 // OpenFindings returns findings that still want attention, worst first, with

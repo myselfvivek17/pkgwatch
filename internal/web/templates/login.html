@@ -1,0 +1,51 @@
+{{define "login"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · pkgwatch</title>
+<link rel="stylesheet" href="/static/theme.css">
+<link rel="stylesheet" href="/static/app.css">
+<script>
+  try {
+    if (localStorage.getItem("pkgwatch-theme") === "light") {
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+  } catch (e) {}
+</script>
+</head>
+{{/* No sidebar. Every nav link leads somewhere this session cannot reach, and
+     a menu of doors that all bounce you back here is worse than no menu. */}}
+<body class="pw-login-body">
+<main class="pw-login">
+  <div class="pw-brand">
+    <span class="pw-brand-mark">
+      <svg width="13" height="13" viewBox="0 0 12 12" aria-hidden="true">
+        <rect x="0.5" y="6" width="2.4" height="5.5" fill="currentColor"></rect>
+        <rect x="4.8" y="2.5" width="2.4" height="9" fill="currentColor"></rect>
+        <rect x="9.1" y="4.5" width="2.4" height="7" fill="currentColor"></rect>
+      </svg>
+    </span>
+    <div>
+      <div class="pw-brand-name">pkgwatch</div>
+      <div class="pw-brand-sub">{{.Identity}}</div>
+    </div>
+  </div>
+
+  <form method="post" action="/login" class="pw-login-form">
+    <label for="password">Hub password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password"
+           autofocus required>
+    <button type="submit">Sign in</button>
+    {{if .Problem}}<p class="pw-login-problem" role="alert">{{.Problem}}</p>{{end}}
+  </form>
+
+  <p class="pw-muted">
+    This dashboard approves devices, revokes their access and lists every
+    package on every machine in the fleet. Set the password with
+    <code class="pw-mono">pkgwatch hub set-password</code>.
+  </p>
+</main>
+</body>
+</html>
+{{end}}

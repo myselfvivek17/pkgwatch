@@ -328,6 +328,59 @@ func TestReturningPackageReopensFinding(t *testing.T) {
 	}
 }
 
+// Closing and reopening happen during an unattended pass, so the timeline is
+// the only place either is ever visible. Without a row, a machine whose
+// findings dropped overnight shows the new number and no account of the change.
+func TestCloseAndReopenReachTheTimeline(t *testing.T) {
+	handle, store, info := newWatched(t)
+	lodash := pkgRow("pkg:npm/lodash@4.17.20", "npm", "lodash", "4.17.20", match.ScopeProject)
+	installed(store, t, lodash)
+
+	if _, err := watch.Run(handle, store, info, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkGone([]string{lodash.PURL}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := watch.Run(handle, store, info, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	installed(store, t, lodash)
+	if _, err := watch.Run(handle, store, info, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	events, err := store.Events(repo.EventFilter{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]repo.Event{}
+	for _, e := range events {
+		kinds[e.Kind] = e
+	}
+
+	fixed, ok := kinds[repo.EventFindingFixed]
+	if !ok {
+		t.Fatal("no finding_fixed event — the close left no trace on the timeline")
+	}
+	if fixed.Detail["count"] != "1" {
+		t.Errorf("fixed count = %q, want 1", fixed.Detail["count"])
+	}
+
+	back, ok := kinds[repo.EventFindingBack]
+	if !ok {
+		t.Fatal("no finding_reopened event — a vulnerability came back in silence")
+	}
+	// Filed under the tier of what actually returned, so a critical coming back
+	// gets the critical row treatment rather than a neutral one.
+	if back.Severity != "high" {
+		t.Errorf("reopened severity = %q, want high (the lodash advisory's tier)", back.Severity)
+	}
+	if back.Routine() {
+		t.Error("a returning vulnerability must not render as routine machinery")
+	}
+}
+
 // An ignored finding was a decision about the package, not about whether it
 // happened to be installed that week.
 func TestReopenLeavesIgnoredAlone(t *testing.T) {

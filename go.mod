@@ -12,6 +12,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/package-url/packageurl-go v0.1.6
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/crypto v0.55.0
 	modernc.org/sqlite v1.56.0
 )
 
