@@ -275,11 +275,11 @@ func (s *Server) Routes(r chi.Router) {
 			if s.SetDeviceStatus != nil {
 				r.Post("/devices/action", guard(s.handleDeviceAction))
 			}
+		} else {
+			r.Get("/", s.handleOverview)
 		}
 		if s.SearchPackages != nil && s.InventoryCoverage != nil {
 			r.Get("/search", s.handleSearch)
-		} else {
-			r.Get("/", s.handleOverview)
 		}
 		r.Get("/design", s.handleDesign)
 		if s.Events != nil {
