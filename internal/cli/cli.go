@@ -212,7 +212,7 @@ func printStatus(cmd *cobra.Command, cfg config.Config) error {
 	switch {
 	case st.RevokedAt != "":
 		fmt.Fprintf(w, "hub\tREFUSED by %s since %s — not syncing\n", orDash(st.HubURL), st.RevokedAt)
-		fmt.Fprintf(w, "\tgating and scanning are unaffected; re-approve it on the hub, or `pkgwatch agent unpair`\n")
+		fmt.Fprintf(w, "\tgating and scanning are unaffected; re-approve it on the hub and restart the agent, or `pkgwatch agent unpair`\n")
 	case st.Paired:
 		fmt.Fprintf(w, "hub\tpaired — %s\n", orDash(st.HubURL))
 		if st.LastSync == "" {

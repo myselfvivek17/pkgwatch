@@ -248,6 +248,38 @@ func machineRank(m Machine) int {
 	}
 }
 
+// SearchData backs the cross-machine package search.
+//
+// NotSearched is not a footnote. Sync level defaults to findings, so on a
+// default fleet no machine has sent an inventory and every search correctly
+// returns nothing — which reads as "you do not have it" unless the page says
+// which machines were actually looked at.
+type SearchData struct {
+	Query       string
+	Hits        []repo.FleetSearchHit
+	Searched    []string
+	NotSearched []string
+}
+
+func (d SearchData) Asked() bool { return d.Query != "" }
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	data := SearchData{Query: strings.TrimSpace(r.URL.Query().Get("q"))}
+
+	var err error
+	if data.Searched, data.NotSearched, err = s.InventoryCoverage(); err != nil {
+		http.Error(w, "coverage unavailable: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if data.Asked() {
+		if data.Hits, err = s.SearchPackages(data.Query); err != nil {
+			http.Error(w, "search failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	s.render(w, "search", "Package search", "search", data)
+}
+
 // handleDevices renders the pairing page.
 func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 	devices, err := s.Devices()

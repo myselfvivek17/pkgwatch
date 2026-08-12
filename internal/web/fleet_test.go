@@ -191,6 +191,34 @@ func TestDeviceActionsRefuseCrossSitePosts(t *testing.T) {
 	}
 }
 
+// A fleet on the default sync level sends no inventory at all, so every search
+// returns nothing — and nothing reads as "you do not have it" unless the page
+// says which machines were actually looked at.
+func TestSearchNamesWhatItDidNotLookAt(t *testing.T) {
+	srv, err := New(ModeHub, "homelab")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Overview = func() (OverviewData, error) { return OverviewData{Mode: "hub"}, nil }
+	srv.SearchPackages = func(string) ([]repo.FleetSearchHit, error) { return nil, nil }
+	srv.InventoryCoverage = func() ([]string, []string, error) {
+		return []string{"laptop"}, []string{"nas (findings)"}, nil
+	}
+	r := chi.NewRouter()
+	srv.Routes(r)
+
+	body := page(t, r, "/search?q=lodash")
+	if !strings.Contains(body, "NOT searched") {
+		t.Error("a zero-result search did not name the machines it could not look at")
+	}
+	if !strings.Contains(body, "nas (findings)") {
+		t.Error("the machine sending findings only is not named")
+	}
+	if !strings.Contains(body, "not a statement about any machine not listed") {
+		t.Error("the empty result reads as an answer about the whole fleet")
+	}
+}
+
 func fleetPage(t *testing.T, devices []repo.Device, findings map[string]map[string]int) string {
 	t.Helper()
 	return page(t, fleetServer(t, devices, findings), "/")

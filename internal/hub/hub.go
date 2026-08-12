@@ -126,6 +126,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 	srv.SetDeviceStatus = func(id, status string) error {
 		return st.Repo.SetDeviceStatus(id, status, time.Now())
 	}
+	srv.SearchPackages = func(query string) ([]repo.FleetSearchHit, error) {
+		return st.Repo.SearchPackages(query, 200)
+	}
+	srv.InventoryCoverage = st.Repo.InventoryCoverage
 
 	// Fleet events, so the hub's timeline is every machine's rather than none.
 	srv.Events = st.Repo.FleetEvents

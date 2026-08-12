@@ -243,6 +243,92 @@ func (h Hub) OldestFleetEventAt() (time.Time, error) {
 	return time.Unix(ts.Int64, 0), nil
 }
 
+// FleetSearchHit is one machine holding a package.
+type FleetSearchHit struct {
+	DeviceID  string
+	Hostname  string
+	Ecosystem string
+	Name      string
+	Version   string
+	Scope     string
+	LastSeen  time.Time
+}
+
+// SearchPackages answers "which of my machines has this installed".
+//
+// Only devices at sync_level = full have packages here at all, which is why
+// the caller is also told which devices were searchable. A search across three
+// machines that returns nothing, when only one of them ever sent an inventory,
+// is the difference between "nowhere" and "we did not look" — and this project
+// has shipped that bug twice already.
+func (h Hub) SearchPackages(query string, limit int) ([]FleetSearchHit, error) {
+	if limit <= 0 {
+		limit = 200
+	}
+	// Matched on name only, not the full purl. A person searching "lodash"
+	// wants every version of it, which is the whole question being asked.
+	rows, err := h.DB.Query(`SELECT p.device_id, d.hostname, p.ecosystem, p.name,
+		p.version, p.scope, p.last_seen
+		FROM fleet_packages p JOIN devices d ON d.id = p.device_id
+		WHERE p.name LIKE ? ESCAPE '\'
+		ORDER BY p.name, d.hostname, p.version LIMIT ?`, "%"+likeEscape(query)+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FleetSearchHit
+	for rows.Next() {
+		var hit FleetSearchHit
+		var seen int64
+		if err := rows.Scan(&hit.DeviceID, &hit.Hostname, &hit.Ecosystem, &hit.Name,
+			&hit.Version, &hit.Scope, &seen); err != nil {
+			return nil, err
+		}
+		hit.LastSeen = time.Unix(seen, 0)
+		out = append(out, hit)
+	}
+	return out, rows.Err()
+}
+
+// likeEscape stops a package name containing % or _ from turning into a
+// wildcard — "node_modules" would otherwise match "nodeXmodules".
+func likeEscape(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+// InventoryCoverage names the devices whose packages are actually on file, and
+// those approved but sending only findings.
+//
+// Returned together because a search result is meaningless without it. Sync
+// level defaults to findings (§3.3), so on a default fleet the package table is
+// empty and every search correctly returns nothing — which reads as "you do not
+// have it" unless the page says otherwise.
+func (h Hub) InventoryCoverage() (searched, notSearched []string, err error) {
+	rows, err := h.DB.Query(`SELECT d.hostname, d.sync_level,
+		EXISTS(SELECT 1 FROM fleet_packages p WHERE p.device_id = d.id)
+		FROM devices d WHERE d.status = ? ORDER BY d.hostname`, DeviceStatusApproved)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var hostname, level string
+		var hasPackages bool
+		if err := rows.Scan(&hostname, &level, &hasPackages); err != nil {
+			return nil, nil, err
+		}
+		if hasPackages {
+			searched = append(searched, hostname)
+		} else {
+			notSearched = append(notSearched, hostname+" ("+level+")")
+		}
+	}
+	return searched, notSearched, rows.Err()
+}
+
 // FleetFindingCounts returns open findings per tier for one device.
 //
 // Ignored and fixed are excluded, matching the agent's own count, so the number

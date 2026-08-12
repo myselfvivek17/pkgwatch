@@ -47,7 +47,11 @@ func runSync(ctx context.Context, cfg config.Config) {
 			// Revoked, or unknown to the hub. Retrying cannot fix either — both
 			// need a person — and an agent that kept trying would sit in a
 			// backoff loop looking healthy while reporting nothing.
-			slog.Warn("fleet sync stopped; the agent keeps gating and scanning locally")
+			//
+			// Halted for this process only. Restarting the agent retries once,
+			// which is what makes re-approving on the hub actually recoverable.
+			slog.Warn("fleet sync stopped until this agent is restarted; " +
+				"gating and scanning are unaffected")
 			return
 		case syncFailed:
 			wait = backoff
@@ -252,17 +256,14 @@ func clientFor(store repo.Agent) (*fleet.Client, error) {
 		return nil, nil
 	}
 
-	// A device already refused by the hub does not keep asking. The marker is
-	// cleared by a successful push, so re-approving on the hub is enough to
-	// bring it back on the next daemon start.
-	revoked, err := store.HubState(repo.HubRevoked)
-	if err != nil {
-		return nil, err
-	}
-	if revoked != "" {
-		return nil, nil
-	}
-
+	// The stored revocation marker is deliberately NOT consulted here.
+	//
+	// It records what the hub last said, for `pkgwatch status` and the
+	// dashboard to report. Treating it as a gate would be a one-way door: the
+	// marker is only cleared by a successful push, and a client that refuses to
+	// be built cannot make one — so re-approving a device on the hub could
+	// never bring it back, on this or any later run. Halting is per-process
+	// instead, which makes a restart the recovery path.
 	id, err := device.Decode(encodedKey)
 	if err != nil {
 		return nil, err

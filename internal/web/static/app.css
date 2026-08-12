@@ -356,6 +356,24 @@ body { margin: 0; background: var(--bg); }
    outcome was never written, which is not the same as a clean one. */
 .pw-outcome-unfinished { border-style: dashed; }
 
+/* ---- package search ------------------------------------------------------ */
+
+.pw-search { display: flex; gap: 8px; margin-bottom: 14px; max-width: 460px; }
+.pw-search input, .pw-search button {
+  background: var(--bg-sunken); color: var(--text);
+  border: 1px solid var(--border); border-radius: 5px;
+  padding: 6px 9px; font: inherit; font-size: 13px;
+}
+.pw-search input { flex: 1; }
+.pw-search button { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); cursor: pointer; }
+.pw-search input:focus-visible, .pw-search button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Coverage sits above the results for the same reason it does on the inventory
+   page: a search that found nothing and a search that looked nowhere return
+   the same empty table. */
+.pw-coverage { font-size: 11.5px; color: var(--text-dim); margin-bottom: 16px; display: grid; gap: 5px; max-width: 74ch; }
+.pw-coverage-warn { color: var(--sev-high-fg); }
+
 /* ---- fleet overview ------------------------------------------------------ */
 
 .pw-alert {

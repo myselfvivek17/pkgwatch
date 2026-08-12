@@ -54,6 +54,7 @@ func nav(mode Mode, active string) []NavItem {
 		{Key: "inventory", Label: "Inventory", Href: "/inventory", Enabled: true},
 		// Pairing is a hub-only page: an agent has nothing to approve.
 		{Key: "pairing", Label: "Device pairing", Href: "/devices", Enabled: mode == ModeHub},
+		{Key: "search", Label: "Package search", Href: "/search", Enabled: mode == ModeHub},
 		{Key: "settings", Label: "Settings", Href: "/settings"},
 		{Key: "quarantine", Label: "Quarantine", Href: "/quarantine"},
 	}
@@ -138,6 +139,12 @@ type Server struct {
 	DeviceFindings  func(deviceID string) (map[string]int, error)
 	SetDeviceStatus func(deviceID, status string) error
 
+	// SearchPackages and InventoryCoverage back the cross-machine search. The
+	// coverage half is not optional: it is what distinguishes "no machine has
+	// this" from "no machine sends an inventory".
+	SearchPackages    func(query string) ([]repo.FleetSearchHit, error)
+	InventoryCoverage func() (searched, notSearched []string, err error)
+
 	// HistoryDays is the retention window, shown so a timeline that stops is
 	// distinguishable from a machine that did nothing.
 	HistoryDays int
@@ -219,7 +226,7 @@ type badgeRow struct {
 func New(mode Mode, hostname string) (*Server, error) {
 	s := &Server{Mode: mode, Hostname: hostname, templates: map[string]*template.Template{}}
 	for _, page := range []string{"overview", "design", "timeline", "findings", "inventory",
-		"sessions", "session-report", "fleet", "devices"} {
+		"sessions", "session-report", "fleet", "devices", "search"} {
 		tpl, err := template.ParseFS(assets,
 			"templates/layout.html",
 			"templates/partials/*.html",
@@ -268,10 +275,12 @@ func (s *Server) Routes(r chi.Router) {
 			if s.SetDeviceStatus != nil {
 				r.Post("/devices/action", guard(s.handleDeviceAction))
 			}
+		}
+		if s.SearchPackages != nil && s.InventoryCoverage != nil {
+			r.Get("/search", s.handleSearch)
 		} else {
 			r.Get("/", s.handleOverview)
 		}
-		r.Get("/machine", s.handleOverview)
 		r.Get("/design", s.handleDesign)
 		if s.Events != nil {
 			r.Get("/timeline", s.handleTimeline)
@@ -309,10 +318,6 @@ func (s *Server) renderPartial(name string, data any) (string, error) {
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
 	data, err := s.Overview()
 	if err != nil {
 		http.Error(w, "overview unavailable: "+err.Error(), http.StatusInternalServerError)

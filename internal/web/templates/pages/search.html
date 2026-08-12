@@ -1,0 +1,57 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">Package search</h1>
+
+  {{with .Data}}
+  <form method="get" action="/search" class="pw-search">
+    <input type="search" name="q" value="{{.Query}}" placeholder="lodash" autofocus
+           aria-label="Package name">
+    <button type="submit">Search</button>
+  </form>
+
+  {{/* Coverage above the results, not below. A search across a fleet where
+       nobody sends an inventory returns nothing and reads as "you do not have
+       it" — the same failure as an ecosystem the advisory bundle never covered. */}}
+  <div class="pw-coverage">
+    {{if .Searched}}
+      <div>Searched: <span class="pw-mono">{{range $i, $h := .Searched}}{{if $i}}, {{end}}{{$h}}{{end}}</span></div>
+    {{else}}
+      <div class="pw-coverage-warn">No machine on this hub sends its inventory, so there is nothing to search.</div>
+    {{end}}
+    {{if .NotSearched}}
+      <div class="pw-coverage-warn">
+        NOT searched: <span class="pw-mono">{{range $i, $h := .NotSearched}}{{if $i}}, {{end}}{{$h}}{{end}}</span>
+        — these send findings only. Set <code class="pw-mono">sync_level = "full"</code> in the
+        agent's config to include their inventory.
+      </div>
+    {{end}}
+  </div>
+
+  {{if .Asked}}
+    {{if .Hits}}
+    <table class="pw-table">
+      <thead>
+        <tr><th>Machine</th><th>Package</th><th>Version</th><th>Ecosystem</th><th>Scope</th></tr>
+      </thead>
+      <tbody>
+        {{range .Hits}}
+        <tr>
+          <td>{{.Hostname}}</td>
+          <td class="pw-mono pw-wrap">{{.Name}}</td>
+          <td class="pw-mono">{{.Version}}</td>
+          <td>{{.Ecosystem}}</td>
+          <td class="pw-dim">{{.Scope}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+      <p class="pw-muted">
+        No match for <span class="pw-mono">{{.Query}}</span> on the machines listed above.
+        That is not a statement about any machine not listed there.
+      </p>
+    {{end}}
+  {{end}}
+  {{end}}
+</div>
+{{end}}
