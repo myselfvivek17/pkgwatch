@@ -21,7 +21,13 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/pkgwatch agent
-Restart=on-failure
+
+# always, not on-failure. systemd restarts on a non-zero status, a signal, a
+# timeout or a watchdog — and does nothing at all when the process exits 0. For
+# something that is only ever supposed to be running, exit 0 is not success, it
+# is the service being gone. The Windows side of this fleet had the same hole
+# and the gate stayed down for seven hours with the task reporting green.
+Restart=always
 RestartSec=5
 
 [Install]

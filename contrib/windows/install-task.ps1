@@ -30,8 +30,25 @@ if (-not (Test-Path $BinaryPath)) {
 $action = New-ScheduledTaskAction -Execute $BinaryPath -Argument "agent"
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 
-# Restart on failure, and never stop it for running too long or being on battery:
-# a watchdog that quits after 72 hours is a watchdog you stop trusting.
+# Repeat the logon trigger forever, every five minutes.
+#
+# This is not belt and braces, it is the only thing that restarts the agent
+# after a clean exit. Windows restarts a task that FAILS; a task whose action
+# exits 0 is a task that completed successfully, so nothing happens and the
+# state stays "Ready" with LastTaskResult 0 - which reads as perfectly healthy
+# in Task Scheduler while the gate is wide open. That is exactly how this agent
+# was found down for seven hours.
+#
+# MultipleInstances defaults to IgnoreNew, so a repetition that fires while the
+# agent is already running is discarded rather than starting a second one that
+# would fight for the same ports.
+$trigger.Repetition = (New-CimInstance -ClassName MSFT_TaskRepetitionPattern `
+    -Namespace Root/Microsoft/Windows/TaskScheduler -ClientOnly `
+    -Property @{ Interval = "PT5M"; Duration = ""; StopAtDurationEnd = $false })
+
+# Never stop it for running too long or being on battery: a watchdog that quits
+# after 72 hours is a watchdog you stop trusting. RestartCount covers a crash;
+# the repetition above covers everything else.
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `

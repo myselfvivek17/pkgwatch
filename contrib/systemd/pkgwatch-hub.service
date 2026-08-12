@@ -1,0 +1,35 @@
+# User unit, matching the agent's. Install to ~/.config/systemd/user/ then:
+#   systemctl --user enable --now pkgwatch-hub
+#   loginctl enable-linger $USER     # so it survives logout
+#
+# The hub binds a routable address and refuses to start without a password hash
+# in the config (§8), so set one first:
+#   pkgwatch hub set-password
+#
+# If a firewall is running, the port needs opening — and scope it to the LAN
+# rather than the world:
+#   sudo ufw allow from 192.168.0.0/24 to any port 4876 proto tcp
+
+[Unit]
+Description=pkgwatch fleet hub
+Documentation=https://github.com/myselfvivek17/pkgwatch
+After=network-online.target
+
+# The hub is a convenience, never a dependency — agents gate installs whether or
+# not it is up (§0, hard rule 1). It still restarts forever rather than tripping
+# systemd's start-rate limit, because a hub that quietly gave up looks exactly
+# like a fleet where nothing has gone wrong: no machine reports, and every card
+# on the overview page is one nobody is looking at.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/pkgwatch hub
+
+# always, not on-failure — see the agent unit. A clean exit is not success for a
+# daemon, and on-failure ignores it.
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
