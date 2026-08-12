@@ -12,10 +12,22 @@
   <summary class="pw-row-head">
     <span class="pw-row-time pw-mono">{{.Time}}</span>
     <span class="pw-row-kind">{{.KindLabel}}</span>
-    <span class="pw-row-summary">{{.Summary}}</span>
+    <span class="pw-row-summary{{if .Grouped}} pw-row-grouped{{end}}">{{.Summary}}</span>
     {{if .Tier}}{{template "severity-badge" .Badge}}{{end}}
   </summary>
-  {{if .HasDetail}}
+  {{if .Grouped}}
+  {{/* Folded, never dropped. One bundle sync wrote 156 of these in a single
+       second; rendering them one per line is a page nobody scrolls, which is
+       how the row that mattered goes unread. The members are all still here. */}}
+  <div class="pw-row-detail pw-row-members">
+    {{range .Members}}
+      <div class="pw-member">
+        <span class="pw-member-summary">{{.Summary}}</span>
+        {{if .Tier}}{{template "severity-badge" .Badge}}{{end}}
+      </div>
+    {{end}}
+  </div>
+  {{else if .HasDetail}}
   <div class="pw-row-detail">
     <dl class="pw-kv">
       {{range .Fields}}<dt>{{.Key}}</dt><dd class="pw-mono">{{.Value}}</dd>{{end}}

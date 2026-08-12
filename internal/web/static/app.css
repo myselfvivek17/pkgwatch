@@ -312,6 +312,28 @@ input, button, select, textarea { font: inherit; }
 /* Critical, and any degraded gate regardless of severity. */
 .pw-row-alarming { background: var(--sev-critical-bg-subtle); border-color: var(--sev-critical-bg); }
 
+/* A collapsed batch reads as a count, so it gets the weight of a count rather
+   than of a sentence. */
+.pw-row-grouped { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* Indented to line up under the summary column of the row that owns them, so
+   the list reads as belonging to that row rather than starting a new one.
+   54 + 132 columns plus two 14px gaps and the row's own 14px padding. */
+.pw-row-members {
+  display: grid; gap: 3px;
+  max-height: 320px; overflow-y: auto;
+  border-top: 1px solid var(--border); margin-top: 2px;
+  padding: 8px 14px 4px 228px;
+}
+@media (max-width: 720px) {
+  .pw-row-members { padding-left: 14px; }
+}
+.pw-member {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  font-size: 12px; color: var(--text-dim);
+}
+.pw-member-summary { overflow-wrap: break-word; min-width: 0; }
+
 .pw-row-detail { padding: 2px 13px 13px 13px; animation: pw-expand 0.18s ease-out; }
 .pw-row-detail .pw-kv { grid-template-columns: 110px 1fr; font-size: 12px; }
 .pw-row-detail dt { color: var(--text-faint); }
