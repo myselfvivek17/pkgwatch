@@ -75,7 +75,18 @@ func (s *State) handleSync(now func() time.Time) http.HandlerFunc {
 		// hub a map of exploitable software on every machine (§3.3); the hub's
 		// record of the level is authoritative so a compromised agent cannot
 		// start volunteering it.
-		if dev.SyncLevel == "full" && len(req.Packages) > 0 {
+		if dev.SyncLevel != repo.SyncLevelFull && len(req.Packages) > 0 {
+			// An agent set to full whose hub row still says findings sends its
+			// whole inventory and has it dropped on the floor. Both sides read
+			// as working — the agent reports packages sent, the search page
+			// reports the machine as findings-only — and nothing connects the
+			// two. Said once per push, on the side that made the decision.
+			slog.Warn("dropped an inventory this hub is not set to accept",
+				"device", dev.ID, "packages", len(req.Packages),
+				"hub_level", dev.SyncLevel,
+				"fix", "press \"accept inventory\" for this device on the pairing page")
+		}
+		if dev.SyncLevel == repo.SyncLevelFull && len(req.Packages) > 0 {
 			packages := make([]repo.FleetPackage, 0, len(req.Packages))
 			for _, p := range req.Packages {
 				packages = append(packages, repo.FleetPackage{

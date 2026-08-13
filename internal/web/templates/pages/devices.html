@@ -26,7 +26,7 @@
   {{else}}
   <table class="pw-table">
     <thead>
-      <tr><th>Device ID</th><th>Host</th><th>OS</th><th>Status</th><th>Last report</th><th></th></tr>
+      <tr><th>Device ID</th><th>Host</th><th>OS</th><th>Status</th><th>Sends</th><th>Last report</th><th></th></tr>
     </thead>
     <tbody>
       {{range .Devices}}
@@ -35,6 +35,11 @@
         <td>{{.Device.Hostname}}</td>
         <td class="pw-mono">{{.Device.OS}}/{{.Device.Arch}}</td>
         <td>{{.Device.Status}}</td>
+        {{/* What this hub accepts from the machine, which is not what the
+             machine is configured to send — both have to say full before an
+             inventory arrives, and showing only one of them would explain
+             neither an empty package search nor a full one. */}}
+        <td>{{if eq .Device.SyncLevel "full"}}findings + inventory{{else}}findings only{{end}}</td>
         {{/* Never a timestamp for a machine that has never sent anything —
              "never" and "a while ago" are different problems. */}}
         <td>{{if .Device.EverReported}}{{.Silence}} ago{{else}}never{{end}}</td>
@@ -43,6 +48,15 @@
             <input type="hidden" name="device" value="{{.Device.ID}}">
             {{if .Device.Approved}}
               <button name="action" value="revoke" type="submit">Revoke</button>
+              {{if $.Data.CanSetSyncLevel}}
+                {{if eq .Device.SyncLevel "full"}}
+                  <button name="action" value="inventory-off" type="submit"
+                    title="stop accepting this machine's package list, and drop the one held">no inventory</button>
+                {{else}}
+                  <button name="action" value="inventory-on" type="submit"
+                    title="accept this machine's package list, so cross-machine search can find it">accept inventory</button>
+                {{end}}
+              {{end}}
             {{else}}
               <button name="action" value="approve" type="submit">Approve</button>
             {{end}}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -209,6 +210,44 @@ func (h Hub) SetDeviceStatus(id, status string, now time.Time) error {
 	}
 	if rowsAffected(result) == 0 {
 		return ErrNoSuchDevice
+	}
+	return nil
+}
+
+// Sync levels a device may be set to on the hub.
+const (
+	SyncLevelFindings = "findings"
+	SyncLevelFull     = "full"
+)
+
+// SetDeviceSyncLevel decides whether this hub accepts a device's inventory.
+//
+// The hub's record is the authoritative one and this is the only thing that
+// changes it: the level an agent announces at enrolment seeds the row, and
+// nothing an agent sends afterwards can raise it. Sending the full package list
+// hands the hub a map of exploitable software on that machine (§3.3), so
+// starting to volunteer it has to be a decision taken here, by a person, rather
+// than something a compromised agent can switch on for itself.
+func (h Hub) SetDeviceSyncLevel(id, level string) error {
+	if level != SyncLevelFindings && level != SyncLevelFull {
+		return fmt.Errorf("sync level %q is neither %q nor %q", level, SyncLevelFindings, SyncLevelFull)
+	}
+
+	result, err := h.DB.Exec("UPDATE devices SET sync_level = ? WHERE id = ?", level, id)
+	if err != nil {
+		return err
+	}
+	if rowsAffected(result) == 0 {
+		return ErrNoSuchDevice
+	}
+
+	// Dropping to findings clears what was already collected. Leaving it would
+	// mean the search page keeps answering from an inventory this hub is no
+	// longer allowed to receive, growing staler with every uninstall.
+	if level == SyncLevelFindings {
+		if _, err := h.DB.Exec("DELETE FROM fleet_packages WHERE device_id = ?", id); err != nil {
+			return err
+		}
 	}
 	return nil
 }

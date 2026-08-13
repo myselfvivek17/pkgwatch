@@ -148,6 +148,11 @@ type Server struct {
 	DeviceFindings  func(deviceID string) (map[string]int, error)
 	SetDeviceStatus func(deviceID, status string) error
 
+	// SetDeviceSyncLevel decides whether this hub accepts a machine's inventory.
+	// Separate from approval on purpose: trusting a machine's findings is not
+	// the same as holding a list of everything installed on it (§3.3).
+	SetDeviceSyncLevel func(deviceID, level string) error
+
 	// SearchPackages and InventoryCoverage back the cross-machine search. The
 	// coverage half is not optional: it is what distinguishes "no machine has
 	// this" from "no machine sends an inventory".

@@ -170,6 +170,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	srv.SetDeviceStatus = func(id, status string) error {
 		return st.Repo.SetDeviceStatus(id, status, time.Now())
 	}
+	srv.SetDeviceSyncLevel = st.Repo.SetDeviceSyncLevel
 	srv.SearchPackages = func(query string) ([]repo.FleetSearchHit, error) {
 		return st.Repo.SearchPackages(query, 200)
 	}

@@ -297,15 +297,21 @@ func (s *Server) handleDevices(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, Machine{Device: d, Now: now})
 	}
 	s.render(w, "devices", "Device pairing", "pairing", DevicesData{
-		Devices: rows,
-		Problem: r.URL.Query().Get("problem"),
-		Done:    r.URL.Query().Get("done"),
+		Devices:         rows,
+		CanSetSyncLevel: s.SetDeviceSyncLevel != nil,
+		Problem:         r.URL.Query().Get("problem"),
+		Done:            r.URL.Query().Get("done"),
 	})
 }
 
 // DevicesData backs the pairing page.
 type DevicesData struct {
 	Devices []Machine
+
+	// CanSetSyncLevel hides the inventory control when nothing is wired to
+	// serve it, on the same rule as the nav: a button is a promise.
+	CanSetSyncLevel bool
+
 	Problem string
 	Done    string
 }
@@ -318,6 +324,32 @@ func (s *Server) handleDeviceAction(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PostFormValue("device")
 	action := r.PostFormValue("action")
+
+	// Inventory is a separate decision from trust. A machine can be approved to
+	// report findings for years without this hub ever holding a list of what is
+	// installed on it, which is why it is its own control rather than something
+	// approval turns on.
+	if action == "inventory-on" || action == "inventory-off" {
+		if s.SetDeviceSyncLevel == nil {
+			http.Redirect(w, r, "/devices?problem=this+hub+cannot+change+sync+levels", http.StatusSeeOther)
+			return
+		}
+		level := repo.SyncLevelFindings
+		if action == "inventory-on" {
+			level = repo.SyncLevelFull
+		}
+		if err := s.SetDeviceSyncLevel(id, level); err != nil {
+			http.Redirect(w, r, "/devices?problem="+urlSafe(err.Error()), http.StatusSeeOther)
+			return
+		}
+		note := id + " now sends findings only; its inventory has been dropped from this hub"
+		if level == repo.SyncLevelFull {
+			note = id + " may now send its inventory — it arrives on that machine's next sync, " +
+				"and only if its own config also says full"
+		}
+		http.Redirect(w, r, "/devices?done="+urlSafe(note), http.StatusSeeOther)
+		return
+	}
 
 	status := repo.DeviceStatusRevoked
 	if action == "approve" {
