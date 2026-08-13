@@ -3,6 +3,8 @@ package repo
 import (
 	"database/sql"
 	"time"
+
+	"github.com/myselfvivek17/pkgwatch/internal/match"
 )
 
 // AnnounceAbove is the contextual score at or above which a finding is
@@ -254,15 +256,10 @@ func (a Agent) OpenFindings(attached bool, f FindingFilter) ([]Finding, error) {
 	}
 	fixableOnly := f.FixableOnly
 
-	// Two spellings because the two queries differ in shape: one selects from
-	// findings directly, the other from a CTE whose columns are already
-	// unqualified. Rewriting one into the other with string replacement would
-	// work until a column named "tier" appeared somewhere else in the query.
-	tierClause, cteTierClause := "", ""
+	tierClause := ""
 	var tierArg []any
 	if f.Tier != "" {
 		tierClause = " AND f.tier = ?"
-		cteTierClause = " AND tier = ?"
 		tierArg = append(tierArg, f.Tier)
 	}
 
@@ -292,48 +289,110 @@ func (a Agent) OpenFindings(attached bool, f FindingFilter) ([]Finding, error) {
 	// MAX rather than a join: one advisory id covers several packages and
 	// would otherwise multiply the result set.
 	//
-	// FixedIn is looked up from the bundle rather than stored on the finding.
-	// Whether a fix exists changes when the advisory is updated, not when the
-	// finding was detected — freezing it at detection time would keep saying
-	// "no fix" for something patched last week.
+	// The fix version is not in this query. It used to be MIN(r.fixed), which
+	// is the lowest bound the advisory publishes in any branch — and an
+	// advisory routinely publishes one per maintained branch, so a machine on
+	// the newest branch was told to move to a version five years older than
+	// what it runs. Picking the right one needs the ecosystem's version
+	// comparator, which SQL does not have, so it happens in Go and in exactly
+	// one place for both the agent and the hub.
 	//
-	// The join goes through packages because a finding is keyed by purl and
-	// the advisory rows are keyed by ecosystem and package name.
-	query := `WITH open AS (
-			SELECT f.purl AS purl, f.advisory_id AS advisory_id, f.score AS score,
-				f.tier AS tier, f.state AS state, f.detected_at AS detected_at,
-				COALESCE(t.summary, '') AS summary,
-				(SELECT MAX(a.severity_cvss) FROM adv.advisories a
-				 WHERE a.id = f.advisory_id) AS base_cvss,
-				COALESCE((
-					SELECT MIN(r.fixed) FROM adv.advisories a
-					JOIN adv.advisory_ranges r ON r.advisory_id = a.rowid
-					WHERE a.id = f.advisory_id
-					  AND a.ecosystem = p.ecosystem
-					  AND a.package_name = p.name
-					  AND a.kind <> 'malware'
-					  AND r.fixed IS NOT NULL
-				), '') AS fixed_in
-			FROM findings f
-			LEFT JOIN packages p ON p.purl = f.purl
-			LEFT JOIN adv.advisory_text t ON t.id = f.advisory_id
-			WHERE f.state NOT IN ('ignored', 'fixed')
-		)
-		SELECT purl, advisory_id, score, tier, state, detected_at, summary, base_cvss, fixed_in
-		FROM open
-		WHERE (? = 0 OR fixed_in <> '')` + cteTierClause + `
-		ORDER BY score DESC, purl LIMIT ?`
-
-	only := 0
+	// Fixability therefore filters after the rows are read rather than in the
+	// query, which means the limit has to come off: filtering a LIMIT gives
+	// "the fixable ones among the worst 50", which reads as "the fixable ones"
+	// and is a different list.
+	scan := limit
 	if fixableOnly {
-		only = 1
+		scan = fixableScanCap
 	}
-	args := append(append([]any{only}, tierArg...), limit)
+
+	query := `SELECT f.purl, f.advisory_id, f.score, f.tier, f.state, f.detected_at,
+			COALESCE(t.summary, ''),
+			(SELECT MAX(a.severity_cvss) FROM adv.advisories a WHERE a.id = f.advisory_id),
+			''
+		FROM findings f
+		LEFT JOIN adv.advisory_text t ON t.id = f.advisory_id
+		WHERE f.state NOT IN ('ignored', 'fixed')` + tierClause + `
+		ORDER BY f.score DESC, f.purl LIMIT ?`
+
+	args := append(append([]any{}, tierArg...), scan)
 	rows, err := a.DB.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
-	return scanFindings(rows)
+	findings, err := scanFindings(rows)
+	if err != nil {
+		return nil, err
+	}
+	if err := enrichFixes(a.DB, findings); err != nil {
+		return nil, err
+	}
+
+	if fixableOnly {
+		kept := findings[:0]
+		for _, finding := range findings {
+			if finding.FixedIn != "" {
+				kept = append(kept, finding)
+			}
+		}
+		findings = kept
+	}
+	if len(findings) > limit {
+		findings = findings[:limit]
+	}
+	return findings, nil
+}
+
+// fixableScanCap bounds how many findings are read before the fixable filter
+// runs. Higher than any triage list anyone reads, low enough to stay cheap.
+const fixableScanCap = 5000
+
+// enrichFixes fills in the version each finding should move to, from the
+// attached bundle.
+//
+// One lookup per distinct package rather than per finding: a package carrying
+// nineteen advisories is one query, and real machines have exactly that shape.
+func enrichFixes(handle *sql.DB, findings []Finding) error {
+	type key struct{ ecosystem, name string }
+	looked := map[key][]match.Advisory{}
+
+	for i := range findings {
+		pkg, err := match.ParsePURL(findings[i].PURL)
+		if err != nil {
+			// An unreadable purl is not evidence that no fix exists.
+			findings[i].FixUnknown = true
+			continue
+		}
+
+		id := key{pkg.Ecosystem, pkg.Name}
+		advisories, ok := looked[id]
+		if !ok {
+			if advisories, err = LookupAdvisories(handle, pkg.Ecosystem, pkg.Name); err != nil {
+				return err
+			}
+			looked[id] = advisories
+		}
+
+		found := false
+		for _, adv := range advisories {
+			if adv.ID != findings[i].AdvisoryID {
+				continue
+			}
+			found = true
+			if findings[i].Summary == "" {
+				findings[i].Summary = adv.Summary
+			}
+			if findings[i].BaseCVSS == nil {
+				findings[i].BaseCVSS = adv.SeverityCVSS
+			}
+			findings[i].FixedIn = match.FixFor(adv, pkg)
+		}
+		// A bundle that carries no record of this advisory for this package
+		// knows nothing about fixing it, which is not the same as there being
+		// no fix.
+		findings[i].FixUnknown = !found
+	}
+	return nil
 }
 
 func scanFindings(rows *sql.Rows) ([]Finding, error) {

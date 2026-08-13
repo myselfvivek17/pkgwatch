@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"strings"
 	"time"
-
-	"github.com/myselfvivek17/pkgwatch/internal/match"
 )
 
 // FleetEvent is one timeline row received from a device.
@@ -408,7 +406,7 @@ func (h Hub) FleetFindings(attached bool, f FindingFilter) ([]Finding, error) {
 		return out, nil
 	}
 
-	if err := h.enrich(out); err != nil {
+	if err := enrichFixes(h.DB, out); err != nil {
 		return nil, err
 	}
 	if f.FixableOnly {
@@ -424,73 +422,6 @@ func (h Hub) FleetFindings(attached bool, f FindingFilter) ([]Finding, error) {
 		out = out[:limit]
 	}
 	return out, nil
-}
-
-// enrich fills in what the attached bundle knows about each finding.
-//
-// One lookup per distinct package, not per finding: a package with nineteen
-// advisories against it is one query, and the fleet page routinely shows that
-// exact shape.
-func (h Hub) enrich(findings []Finding) error {
-	type key struct{ ecosystem, name string }
-	looked := map[key][]match.Advisory{}
-
-	for i := range findings {
-		pkg, err := match.ParsePURL(findings[i].PURL)
-		if err != nil {
-			// An unreadable purl is not evidence that no fix exists.
-			findings[i].FixUnknown = true
-			continue
-		}
-
-		id := key{pkg.Ecosystem, pkg.Name}
-		advisories, ok := looked[id]
-		if !ok {
-			if advisories, err = LookupAdvisories(h.DB, pkg.Ecosystem, pkg.Name); err != nil {
-				return err
-			}
-			looked[id] = advisories
-		}
-
-		found := false
-		for _, adv := range advisories {
-			if adv.ID != findings[i].AdvisoryID {
-				continue
-			}
-			found = true
-			findings[i].Summary = adv.Summary
-			findings[i].BaseCVSS = adv.SeverityCVSS
-			findings[i].FixedIn = earliestFix(adv)
-		}
-		// The hub's bundle need not cover every ecosystem its fleet runs. A
-		// Debian finding looked up against an npm-only bundle finds nothing,
-		// which says nothing about whether it is fixable.
-		findings[i].FixUnknown = !found
-	}
-	return nil
-}
-
-// earliestFix mirrors the agent's MIN(r.fixed): the lowest fixed bound the
-// advisory publishes, by string order, and none at all for malware — there is
-// no version of a malicious package that is safe to move to.
-//
-// Deliberately the same rule rather than a better one. The fleet page and the
-// machine's own dashboard showing different fix versions for the same finding
-// is worse than both showing a conservative one.
-func earliestFix(adv match.Advisory) string {
-	if adv.Kind == "malware" {
-		return ""
-	}
-	fix := ""
-	for _, r := range adv.Ranges {
-		if r.Fixed == "" {
-			continue
-		}
-		if fix == "" || r.Fixed < fix {
-			fix = r.Fixed
-		}
-	}
-	return fix
 }
 
 // FleetFindingCounts returns open findings per tier for one device.
