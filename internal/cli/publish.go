@@ -33,7 +33,79 @@ func publishCmd() *cobra.Command {
 		Short:  "Publisher-side bundle tooling",
 		Hidden: true,
 	}
-	cmd.AddCommand(keygenCmd(), buildBundleCmd())
+	cmd.AddCommand(keygenCmd(), buildBundleCmd(), signCmd())
+	return cmd
+}
+
+// signCmd re-creates the manifest for a bundle that already exists.
+//
+// It is here for the machines that staged bundles before the manifest was kept
+// beside them. Those installations hold verified bytes and no signature, which
+// means they cannot relay: a hub can hand over the file but nothing downstream
+// could check it, and "trust it, the hub sent it" is the one thing that is not
+// allowed to be an answer.
+//
+// Signing is deterministic, so re-signing the same bytes with the same key
+// reproduces the signature they arrived with. Nothing new is trusted here — the
+// key is the publisher's, exactly as it was when the bundle was built.
+func signCmd() *cobra.Command {
+	var bundlePath, keyPath, version string
+
+	cmd := &cobra.Command{
+		Use:   "sign",
+		Short: "Write the manifest for an existing bundle",
+		Long: "Write the manifest and signature for a bundle that already exists.\n\n" +
+			"The version and scope are read out of the bundle itself, so what gets signed\n" +
+			"is what the file says it is.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if bundlePath == "" || keyPath == "" {
+				return fmt.Errorf("--file and --key are both required")
+			}
+
+			info, err := readBundleMeta(bundlePath, false)
+			if err != nil {
+				return err
+			}
+			if info.Scope == "" {
+				return fmt.Errorf("%s declares no scope — it cannot be signed as anything", bundlePath)
+			}
+			if version == "" {
+				version = info.Version
+			}
+
+			data, err := os.ReadFile(bundlePath)
+			if err != nil {
+				return err
+			}
+			manifest := bundle.Manifest{
+				Version: version, Scope: info.Scope,
+				SHA256: bundle.Digest(data), Size: int64(len(data)),
+				BuiltAt: info.BuiltAt, RecordCount: info.RecordCount,
+			}
+			if err := signBundle(bundlePath, keyPath, &manifest); err != nil {
+				return err
+			}
+
+			sig, err := hex.DecodeString(manifest.Signature)
+			if err != nil {
+				return err
+			}
+			// Written through the same helper staging uses, so a hand-signed
+			// bundle and a freshly installed one are the same thing on disk.
+			if err := bundle.SaveManifest(bundlePath, manifest, sig); err != nil {
+				return err
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "signed %s %s (%d records) -> %s\n",
+				manifest.Scope, manifest.Version, manifest.RecordCount, bundle.ManifestPath(bundlePath))
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&bundlePath, "file", "", "bundle to sign (required)")
+	cmd.Flags().StringVar(&keyPath, "key", "", "base64 ed25519 private key to sign with (required)")
+	cmd.Flags().StringVar(&version, "version", "", "override the version recorded in the bundle")
 	return cmd
 }
 

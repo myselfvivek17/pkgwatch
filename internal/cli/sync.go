@@ -226,10 +226,44 @@ func installFromHub(cmd *cobra.Command, cfg config.Config, allowDowngrade bool) 
 		fmt.Fprintf(out, "NOT RELAYED: the hub carries no %s bundle, so that scope stays at "+
 			"the version this machine already had\n", strings.Join(missing, ", "))
 	}
+
+	// Nothing new, but a scope this machine holds may still be absent from the
+	// merged database — a previous rebuild that failed leaves exactly that, and
+	// the sources alone are never queried. Without this check the next run says
+	// "already current" and matches against a bundle missing an ecosystem, which
+	// is the difference between a clean machine and an unexamined one.
 	if installed == 0 {
-		return nil
+		unmerged, err := scopesMissingFromMerged(cfg, held)
+		if err != nil || len(unmerged) == 0 {
+			return err
+		}
+		verb := "is"
+		if len(unmerged) > 1 {
+			verb = "are"
+		}
+		fmt.Fprintf(out, "%s %s installed but missing from the merged database, rebuilding\n",
+			strings.Join(unmerged, ", "), verb)
 	}
 	return rebuildMerged(cmd, cfg)
+}
+
+// scopesMissingFromMerged reports held scopes the merged database does not
+// carry. A missing merged file counts as everything missing.
+func scopesMissingFromMerged(cfg config.Config, held map[string]string) ([]string, error) {
+	info, err := readBundleMeta(cfg.AdvisoryDBPath(), false)
+	if err != nil {
+		// Unreadable or absent: whatever is held is not being matched against.
+		info = repo.BundleInfo{}
+	}
+
+	var missing []string
+	for scope := range held {
+		if !info.Covers(scope) {
+			missing = append(missing, scope)
+		}
+	}
+	sort.Strings(missing)
+	return missing, nil
 }
 
 // heldBundleVersions reports the version of each scope already installed here.
@@ -382,7 +416,15 @@ func rebuildMerged(cmd *cobra.Command, cfg config.Config) error {
 
 	merged, err := bundle.Merge(sources, cfg.AdvisoryDBPath(), time.Now())
 	if err != nil {
-		return fmt.Errorf("rebuild the merged advisory database: %w", err)
+		// The commonest cause on Windows by some distance, and the OS error says
+		// only "used by another process" without naming which one. A staged
+		// bundle that never reached the merged database is a machine matching
+		// against advisories it has already downloaded — the gap that reads as a
+		// quiet week.
+		return fmt.Errorf("rebuild the merged advisory database: %w\n"+
+			"If the pkgwatch agent is running it holds this file open. Stop it "+
+			"(`schtasks /end /tn pkgwatch-agent` on Windows, "+
+			"`systemctl --user stop pkgwatch-agent` on Linux) and run `pkgwatch sync --rebuild`", err)
 	}
 
 	// Only now that the bytes are trusted, read what the merged file says about
