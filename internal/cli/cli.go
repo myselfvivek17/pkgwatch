@@ -81,7 +81,7 @@ func Root() *cobra.Command {
 		ignoreCmd(),
 		quarantineCmd(),
 		restoreCmd(),
-		stub("rotate <advisory-id>", "Print the credential rotation checklist", "M6", cobra.ExactArgs(1)),
+		rotateCmd(),
 
 		stub("enable-script-guard", "Set ignore-scripts globally and seed the allowlist", "M6", cobra.NoArgs),
 		stub("allow-scripts <package>", "Allow install scripts for one package", "M6", cobra.ExactArgs(1)),
