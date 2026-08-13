@@ -125,6 +125,12 @@ func printSyncReport(out io.Writer, report bundlesync.Report) {
 		fmt.Fprintf(out, "NOT RELAYED: the hub carries no %s bundle, so that scope stays at "+
 			"the version this machine already had\n", strings.Join(report.NotRelayed, ", "))
 	}
+	if len(report.Unavailable) > 0 {
+		fmt.Fprintf(out, "NO BUNDLE ANYWHERE for %s: this machine has packages from it, holds no "+
+			"bundle for it and the hub has none either — those packages are unexamined, not clean. "+
+			"Build one with `pkgwatch publish build-bundle --split` and put it on the hub\n",
+			strings.Join(report.Unavailable, ", "))
+	}
 	if len(report.Unmerged) > 0 {
 		verb := "is"
 		if len(report.Unmerged) > 1 {

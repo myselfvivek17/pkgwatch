@@ -68,6 +68,12 @@ type Report struct {
 	// at whatever version this machine already had.
 	NotRelayed []string
 
+	// Unavailable is worse than NotRelayed: this machine has packages from
+	// those ecosystems, holds no bundle for them, and the hub has none either.
+	// Nothing is examining them anywhere, and a sync that printed only its
+	// successes would be the last place anyone would look.
+	Unavailable []string
+
 	// Unmerged were installed but absent from the merged database, which is the
 	// state an interrupted rebuild leaves behind.
 	Unmerged []string
@@ -164,8 +170,21 @@ func FromHub(cfg config.Config, client *fleet.Client, opts Options) (Report, err
 			report.NotRelayed = append(report.NotRelayed, scope)
 		}
 	}
+
+	// Wanted, held by nobody, offered by nobody. The machine has packages from
+	// that ecosystem and there is no bundle for it anywhere in this fleet, so
+	// every one of those packages is unexamined rather than clean. It falls
+	// through both lists above — it is not held, so it cannot be "not relayed",
+	// and it was never offered, so it cannot be "not taken".
+	for scope := range wanted {
+		if !offered[scope] && held[scope] == "" {
+			report.Unavailable = append(report.Unavailable, scope)
+		}
+	}
+
 	sort.Strings(report.NotRelayed)
 	sort.Strings(report.Skipped)
+	sort.Strings(report.Unavailable)
 
 	// Nothing new, but a scope this machine holds may still be absent from the
 	// merged database — an interrupted rebuild leaves exactly that, and the

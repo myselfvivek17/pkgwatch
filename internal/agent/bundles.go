@@ -86,6 +86,15 @@ func updateBundlesOnce(cfg config.Config, lease *Lease) {
 		return
 	}
 
+	// Said before the early return, because the case it describes is exactly the
+	// one where nothing was installed: an ecosystem this machine runs that no
+	// bundle in the fleet covers is unexamined everywhere, and "bundles already
+	// current" is the most misleading possible line to end on.
+	if len(report.Unavailable) > 0 {
+		slog.Warn("NO BUNDLE ANYWHERE for these, so packages from them are unexamined rather than clean",
+			"ecosystems", strings.Join(report.Unavailable, ", "))
+	}
+
 	if !report.Rebuilt {
 		slog.Info("bundles already current", "offered", report.Offered, "skipped", len(report.Skipped))
 		return
