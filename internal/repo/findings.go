@@ -43,6 +43,15 @@ type Finding struct {
 	// On an agent every finding is this machine's, and a column repeating the
 	// hostname on every row is a column that says nothing.
 	Machine string
+
+	// FixUnknown means the bundle in hand carries no record of this advisory for
+	// this package, so nothing here knows whether a fix exists. It is a third
+	// state, distinct from an empty FixedIn, which is the positive claim that the
+	// advisory has no published fix. The hub is where the two come apart: it
+	// aggregates findings from machines whose ecosystems its own bundle may not
+	// cover, and rendering "none yet" for a Debian finding against an npm-only
+	// bundle would be inventing an answer.
+	FixUnknown bool
 }
 
 // RecordFindings inserts findings that are not already known.

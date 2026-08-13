@@ -20,6 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/myselfvivek17/pkgwatch/internal/buildinfo"
+	"github.com/myselfvivek17/pkgwatch/internal/bundle"
 	"github.com/myselfvivek17/pkgwatch/internal/config"
 	"github.com/myselfvivek17/pkgwatch/internal/daemon"
 	"github.com/myselfvivek17/pkgwatch/internal/db"
@@ -38,6 +39,14 @@ type State struct {
 	DB       *sql.DB
 	Repo     repo.Hub
 	Hostname string
+
+	// BundleAttached and Bundle describe the advisory bundle this hub holds, if
+	// any. A hub does not need one to aggregate — findings arrive already scored
+	// — but without one it cannot say what fixes them, which is the first thing
+	// anyone looking at a critical actually wants. A hub with no bundle is a
+	// normal state, not an error, and it says so rather than rendering blanks.
+	BundleAttached bool
+	Bundle         repo.BundleInfo
 }
 
 func Open(cfg config.Config) (*State, error) {
@@ -45,7 +54,32 @@ func Open(cfg config.Config) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &State{DB: handle, Repo: repo.Hub{DB: handle}, Hostname: hostname()}, nil
+	st := &State{DB: handle, Repo: repo.Hub{DB: handle}, Hostname: hostname()}
+
+	// Same tolerance as the agent: a missing bundle is ordinary, and a bundle
+	// this build cannot read is worse than none — queries would fail inside the
+	// lookup or quietly return nothing. Degraded, never dead.
+	attached, err := db.AttachAdvisories(handle, cfg.AdvisoryDBPath())
+	if err != nil {
+		slog.Warn("advisory bundle present but unusable", "error", err)
+	}
+	if attached {
+		if err := db.CheckAdvisorySchema(handle, bundle.SchemaVersion); err != nil {
+			attached = false
+			slog.Warn("advisory bundle ignored", "error", err)
+		}
+	}
+	if attached {
+		if info, err := repo.Bundle(handle, true); err == nil {
+			st.Bundle = info
+		} else {
+			attached = false
+			slog.Warn("advisory bundle metadata unreadable", "error", err)
+		}
+	}
+	st.BundleAttached = attached
+
+	return st, nil
 }
 
 func (s *State) Close() error { return s.DB.Close() }
@@ -116,8 +150,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 			DataDir: cfg.DataDir,
 			Listen:  listenLabel,
 			Devices: devices["approved"],
-			// The hub has no advisory bundle of its own until relay is built;
-			// reporting "none" is honest, and better than inventing a version.
+			Bundle:  st.Bundle,
+			// Fleet-wide tier counts belong to the machine cards, which carry
+			// their own; an empty map here means the overview does not repeat
+			// them, not that there are none.
 			Findings: map[string]int{},
 		}, nil
 	}
@@ -136,22 +172,21 @@ func Run(ctx context.Context, cfg config.Config) error {
 	srv.Events = st.Repo.FleetEvents
 	srv.OldestEvent = st.Repo.OldestFleetEventAt
 
-	// Findings across the fleet, read-only. attached is false because the hub
-	// carries no advisory bundle: the page then says CVSS, summaries and fix
-	// versions are unknown rather than rendering them blank, which would read as
-	// "no fix exists".
+	// Findings across the fleet, read-only. With a bundle attached the fix and
+	// CVSS columns are real; without one the page says they are unknown rather
+	// than rendering them blank, which would read as "no fix exists".
 	//
 	// Acknowledge and Ignore stay nil deliberately. The agent is authoritative
 	// for its own findings (§3.3) and sync is outbound-only, so there is no
 	// channel to write a decision back down — buttons here would do nothing.
 	srv.Findings = func(f repo.FindingFilter) ([]repo.Finding, bool, error) {
-		rows, err := st.Repo.FleetFindings(f)
-		return rows, false, err
+		rows, err := st.Repo.FleetFindings(st.BundleAttached, f)
+		return rows, st.BundleAttached, err
 	}
 
 	router := chi.NewRouter()
 	router.Get("/health", daemon.HealthHandler("hub", started, func() (bool, string) {
-		return st.DB.PingContext(ctx) == nil, ""
+		return st.DB.PingContext(ctx) == nil, st.Bundle.Version
 	}))
 	// Agents authenticate with a device token and a signature, not the hub
 	// password, so the API sits outside the dashboard's session guard.

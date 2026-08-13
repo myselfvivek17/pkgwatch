@@ -21,6 +21,12 @@ type FindingsData struct {
 	BundleMissing bool
 	FixableOnly   bool
 
+	// Uncovered counts rows the bundle in hand knows nothing about — findings
+	// from an ecosystem it does not carry. They are listed, because the finding
+	// is a fact the machine reported, but nothing here can say what fixes them
+	// and the page has to name that rather than let the column imply it.
+	Uncovered int
+
 	// CanTriage is false on the hub, where findings belong to another machine.
 	CanTriage bool
 	Back      string
@@ -80,11 +86,22 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, finding := range findings {
+		// "none yet" is a claim that the advisory publishes no fix. Nothing can
+		// make that claim without a bundle to read it from, and a fleet hub can
+		// hold a bundle that does not cover every ecosystem its machines run —
+		// so the two states are spelled differently.
+		fix := "none yet"
+		if !attached || finding.FixUnknown {
+			fix = "unknown"
+			if attached {
+				data.Uncovered++
+			}
+		}
 		row := FindingRow{
 			Tier:     finding.Tier,
 			Score:    fmt.Sprintf("%.1f", finding.Score),
 			CVSS:     "—",
-			Fix:      "none yet",
+			Fix:      fix,
 			PURL:     finding.PURL,
 			Advisory: finding.AdvisoryID,
 			Summary:  finding.Summary,

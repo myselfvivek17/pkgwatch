@@ -82,6 +82,13 @@
         newest version its distribution ships.
       </p>
     {{end}}
+    {{if .Uncovered}}
+      <p class="pw-muted">
+        {{.Uncovered}} of these are from an ecosystem the installed bundle does not carry, so their
+        fix column reads unknown. Nothing here has looked at them — that is not the same as finding
+        no fix.
+      </p>
+    {{end}}
     {{if .Truncated}}
       <p class="pw-muted">Showing the worst {{.Limit}} — there are more.</p>
     {{end}}

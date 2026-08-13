@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"strings"
 	"time"
+
+	"github.com/myselfvivek17/pkgwatch/internal/match"
 )
 
 // FleetEvent is one timeline row received from a device.
@@ -329,21 +331,46 @@ func (h Hub) InventoryCoverage() (searched, notSearched []string, err error) {
 	return searched, notSearched, rows.Err()
 }
 
+// fleetScanCap bounds how many findings are read before the fixable filter is
+// applied in Go. Filtering after a LIMIT would mean "the fixable ones among the
+// worst 100", which reads as "the fixable ones" and is a different list.
+const fleetScanCap = 5000
+
 // FleetFindings returns open findings across the whole fleet, worst first.
 //
-// No summary, no CVSS and no fix version: those live in the advisory bundle and
-// the hub does not carry one. The caller reports attached=false so the page
-// says the columns are unknown rather than leaving them blank, because a blank
-// fix column reads as "no fix exists" and that is the opposite of true.
+// attached says whether an advisory bundle is available to this hub. With one,
+// each row is enriched with the summary, the advisory's own CVSS and the fix
+// version — the three columns that answer "what do I actually do about this",
+// which is the question the hub's own findings page exists to answer. Without
+// one the findings are still listed, because they are recorded facts, and the
+// caller reports attached=false so the page says those columns are unknown
+// rather than leaving them blank: a blank fix column reads as "no fix exists"
+// and that is the opposite of true.
+//
+// The lookup goes through the finding's own purl rather than through
+// fleet_packages. Inventory only arrives at sync_level = full, so on a fleet
+// syncing findings only that join is empty and every fix would come back NULL —
+// the same inversion, arrived at by a different route.
 //
 // Read-only by construction. The agent is authoritative for its own findings
 // (§3.3) and sync is outbound-only, so there is no channel to write a triage
 // decision back down — which is why the page hides its ack and ignore controls
 // here rather than offering buttons that would silently do nothing.
-func (h Hub) FleetFindings(f FindingFilter) ([]Finding, error) {
+func (h Hub) FleetFindings(attached bool, f FindingFilter) ([]Finding, error) {
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 100
+	}
+	if f.FixableOnly && !attached {
+		// Whether a fix exists is only knowable from a bundle. Returning
+		// everything here would claim each one is unfixable.
+		return nil, nil
+	}
+
+	// Read past the limit only when the filter runs afterwards.
+	scan := limit
+	if f.FixableOnly {
+		scan = fleetScanCap
 	}
 
 	query := `SELECT d.hostname, f.purl, f.advisory_id, f.score, f.tier, f.state, f.detected_at
@@ -355,7 +382,7 @@ func (h Hub) FleetFindings(f FindingFilter) ([]Finding, error) {
 		args = append(args, f.Tier)
 	}
 	query += " ORDER BY f.score DESC, d.hostname LIMIT ?"
-	args = append(args, limit)
+	args = append(args, scan)
 
 	rows, err := h.DB.Query(query, args...)
 	if err != nil {
@@ -374,7 +401,96 @@ func (h Hub) FleetFindings(f FindingFilter) ([]Finding, error) {
 		finding.DetectedAt = time.Unix(detected, 0)
 		out = append(out, finding)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !attached {
+		return out, nil
+	}
+
+	if err := h.enrich(out); err != nil {
+		return nil, err
+	}
+	if f.FixableOnly {
+		kept := out[:0]
+		for _, finding := range out {
+			if finding.FixedIn != "" {
+				kept = append(kept, finding)
+			}
+		}
+		out = kept
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// enrich fills in what the attached bundle knows about each finding.
+//
+// One lookup per distinct package, not per finding: a package with nineteen
+// advisories against it is one query, and the fleet page routinely shows that
+// exact shape.
+func (h Hub) enrich(findings []Finding) error {
+	type key struct{ ecosystem, name string }
+	looked := map[key][]match.Advisory{}
+
+	for i := range findings {
+		pkg, err := match.ParsePURL(findings[i].PURL)
+		if err != nil {
+			// An unreadable purl is not evidence that no fix exists.
+			findings[i].FixUnknown = true
+			continue
+		}
+
+		id := key{pkg.Ecosystem, pkg.Name}
+		advisories, ok := looked[id]
+		if !ok {
+			if advisories, err = LookupAdvisories(h.DB, pkg.Ecosystem, pkg.Name); err != nil {
+				return err
+			}
+			looked[id] = advisories
+		}
+
+		found := false
+		for _, adv := range advisories {
+			if adv.ID != findings[i].AdvisoryID {
+				continue
+			}
+			found = true
+			findings[i].Summary = adv.Summary
+			findings[i].BaseCVSS = adv.SeverityCVSS
+			findings[i].FixedIn = earliestFix(adv)
+		}
+		// The hub's bundle need not cover every ecosystem its fleet runs. A
+		// Debian finding looked up against an npm-only bundle finds nothing,
+		// which says nothing about whether it is fixable.
+		findings[i].FixUnknown = !found
+	}
+	return nil
+}
+
+// earliestFix mirrors the agent's MIN(r.fixed): the lowest fixed bound the
+// advisory publishes, by string order, and none at all for malware — there is
+// no version of a malicious package that is safe to move to.
+//
+// Deliberately the same rule rather than a better one. The fleet page and the
+// machine's own dashboard showing different fix versions for the same finding
+// is worse than both showing a conservative one.
+func earliestFix(adv match.Advisory) string {
+	if adv.Kind == "malware" {
+		return ""
+	}
+	fix := ""
+	for _, r := range adv.Ranges {
+		if r.Fixed == "" {
+			continue
+		}
+		if fix == "" || r.Fixed < fix {
+			fix = r.Fixed
+		}
+	}
+	return fix
 }
 
 // FleetFindingCounts returns open findings per tier for one device.
