@@ -22,11 +22,18 @@ import (
 //
 // A port already in use is logged and skipped, not fatal. Losing one gate is a
 // degraded agent; a dead agent gates nothing at all.
-func serveGates(ctx context.Context, cfg config.Config) (func(), error) {
+func serveGates(ctx context.Context, cfg config.Config, lease *Lease) (func(), error) {
 	g, err := gate.Open(cfg)
 	if err != nil {
 		return nil, err
 	}
+
+	// The gate holds the advisory database open for the life of the process, so
+	// it has to be one of the readers a bundle swap stands down — otherwise the
+	// swap fails on Windows, and on Linux the gate keeps answering out of a file
+	// that has been replaced.
+	lease.Register(g.DB)
+	g.Guard = lease.Read
 
 	npmGate := &gate.NPM{Gate: g}
 	if cfg.Agent.NPMUpstream != "" {

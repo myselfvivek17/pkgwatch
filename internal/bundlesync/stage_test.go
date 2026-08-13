@@ -1,4 +1,4 @@
-package cli
+package bundlesync_test
 
 import (
 	"crypto/ed25519"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/myselfvivek17/pkgwatch/internal/bundle"
+	"github.com/myselfvivek17/pkgwatch/internal/bundlesync"
 	"github.com/myselfvivek17/pkgwatch/internal/config"
 )
 
@@ -56,9 +57,8 @@ func TestARelayedBundleIsNotTrustedBecauseTheHubSentIt(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := config.Config{DataDir: t.TempDir()}
-			cmd, _ := promptCmd("")
 
-			err := stageVerified(cmd, cfg, tc.payload, manifest, tc.sig, false)
+			err := bundlesync.Stage(cfg, tc.payload, manifest, tc.sig, bundlesync.Options{})
 			if err == nil {
 				t.Fatal("the bundle was installed")
 			}

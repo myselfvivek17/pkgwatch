@@ -42,7 +42,7 @@ func newHarness(t *testing.T) *harness {
 			DB: handle, Repo: repo.Hub{DB: handle},
 			Hostname: "test-hub", BundleDir: t.TempDir(),
 		},
-		now:   time.Now(),
+		now: time.Now(),
 	}
 	router := chi.NewRouter()
 	h.state.API(router, func() time.Time { return h.now })

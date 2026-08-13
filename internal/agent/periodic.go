@@ -26,7 +26,7 @@ const startupDelay = 30 * time.Second
 // re-examined by a pass nobody triggered, and a tool that requires you to
 // remember to run it is a tool that answers questions you already thought to
 // ask.
-func runPeriodicScans(ctx context.Context, cfg config.Config) {
+func runPeriodicScans(ctx context.Context, cfg config.Config, lease *Lease) {
 	interval := time.Duration(cfg.Agent.ScanIntervalHours) * time.Hour
 	if interval <= 0 {
 		slog.Info("periodic scanning disabled (scan_interval_hours = 0)")
@@ -50,7 +50,14 @@ func runPeriodicScans(ctx context.Context, cfg config.Config) {
 	defer ticker.Stop()
 
 	for {
-		scanOnce(cfg, roots)
+		// A scan opens its own handle and attaches the advisory database for as
+		// long as it runs, so it is a reader like any other: a bundle swap waits
+		// for it rather than pulling the file out from under it. Scans take
+		// seconds and updates come hours apart, so the wait is theoretical.
+		lease.Read(func() error {
+			scanOnce(cfg, roots)
+			return nil
+		})
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():

@@ -118,6 +118,21 @@ type Gate struct {
 	Cooldown time.Duration
 
 	Now func() time.Time
+
+	// Guard, when set, wraps every advisory lookup so the daemon can replace the
+	// merged database underneath a long-running gate. Nil means run directly,
+	// which is right for a one-shot process — there is nothing to coordinate
+	// with, and a gate that needed a coordinator to answer would be a gate that
+	// fails closed for want of one.
+	Guard func(func() error) error
+}
+
+// guarded runs fn under Guard if there is one.
+func (g *Gate) guarded(fn func() error) error {
+	if g.Guard == nil {
+		return fn()
+	}
+	return g.Guard(fn)
 }
 
 func (g *Gate) now() time.Time {
@@ -266,7 +281,12 @@ func (g *Gate) decide(req Request) (verdict Verdict) {
 		return Verdict{Degraded: true, Reason: ReasonDegraded}
 	}
 
-	advisories, err := repo.LookupAdvisories(g.DB, req.Ecosystem, req.Name)
+	var advisories []match.Advisory
+	err := g.guarded(func() error {
+		var err error
+		advisories, err = repo.LookupAdvisories(g.DB, req.Ecosystem, req.Name)
+		return err
+	})
 	if err != nil {
 		g.degrade(req, "advisory lookup failed: "+err.Error())
 		return Verdict{Degraded: true, Reason: ReasonDegraded}

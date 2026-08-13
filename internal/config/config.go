@@ -107,6 +107,17 @@ type AgentConfig struct {
 	// containers and the host's own packages are always scanned regardless.
 	ScanPaths []string `toml:"scan_paths"`
 
+	// BundleIntervalHours is how often the daemon pulls advisory bundles from
+	// the hub it is paired with.
+	//
+	// This is the half of freshness that has nothing to do with scanning: a scan
+	// re-examines the machine against the advisories it has, and this is what
+	// makes those advisories move at all. Matching a current inventory against a
+	// corpus that stopped ageing three weeks ago produces the same clean report
+	// as a machine with nothing wrong. Set to 0 to disable, which means bundles
+	// only ever arrive when someone runs `pkgwatch sync` by hand.
+	BundleIntervalHours int `toml:"bundle_interval_hours"`
+
 	// SyncLevel is one of findings|full|off. Default findings: sending the full
 	// inventory hands the hub a map of exploitable software on every machine,
 	// which should be a conscious choice (§3.3).
@@ -145,15 +156,16 @@ func (h HubConfig) TLSEnabled() bool { return h.TLS == nil || *h.TLS }
 func Default() Config {
 	return Config{
 		Agent: AgentConfig{
-			Bind:              "127.0.0.1",
-			NPMPort:           DefaultNPMPort,
-			PyPIPort:          DefaultPyPIPort,
-			DashboardPort:     DefaultDashboardPort,
-			CooldownHours:     72,
-			BlockTier:         "high",
-			HistoryDays:       90,
-			ScanIntervalHours: 6,
-			SyncLevel:         "findings",
+			Bind:                "127.0.0.1",
+			NPMPort:             DefaultNPMPort,
+			PyPIPort:            DefaultPyPIPort,
+			DashboardPort:       DefaultDashboardPort,
+			CooldownHours:       72,
+			BlockTier:           "high",
+			HistoryDays:         90,
+			ScanIntervalHours:   6,
+			BundleIntervalHours: 6,
+			SyncLevel:           "findings",
 		},
 		Hub: HubConfig{
 			Bind: "0.0.0.0",

@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/myselfvivek17/pkgwatch/internal/bundle"
+	"github.com/myselfvivek17/pkgwatch/internal/bundlesync"
 	"github.com/myselfvivek17/pkgwatch/internal/match"
 	"github.com/myselfvivek17/pkgwatch/internal/osv"
 )
@@ -63,7 +64,7 @@ func signCmd() *cobra.Command {
 				return fmt.Errorf("--file and --key are both required")
 			}
 
-			info, err := readBundleMeta(bundlePath, false)
+			info, err := bundlesync.ReadBundleMeta(bundlePath, false)
 			if err != nil {
 				return err
 			}

@@ -308,6 +308,22 @@ happens; the package you installed six months ago that became known-bad this
 morning is found by a pass nobody triggered — so the daemon re-scans and
 re-matches every `scan_interval_hours` (default 6, `0` disables).
 
+The daemon also pulls advisory bundles from the hub it is paired with every
+`bundle_interval_hours` (default 6, `0` disables), and re-matches against what
+arrives. That is the other half of staying current: a scan re-examines this
+machine against the advisories it holds, and this is what makes those advisories
+move at all. A fresh inventory matched against a corpus that stopped ageing
+three weeks ago produces exactly the same clean report as a machine with nothing
+wrong.
+
+It happens inside the daemon rather than as a second scheduled task because the
+daemon is the process holding the merged database open — the dashboard, both
+gates and every scan read through it. Replacing that file means standing those
+readers down and reattaching them, which only the process that owns them can do.
+On Windows nothing else can do it at all: a rename over a file with an open
+handle fails outright, which is why `pkgwatch sync` from a terminal reports that
+the running agent will pick the bundle up itself.
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File contrib\windows\install-task.ps1
 ```

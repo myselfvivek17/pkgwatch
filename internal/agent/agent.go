@@ -127,10 +127,17 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 	defer st.Close()
 
+	// One lease per process, covering every handle in it that reads advisories.
+	// The daemon is the process that holds the merged database open, which is
+	// what makes it the only one able to replace it: a swap stands its readers
+	// down and reattaches them afterwards.
+	lease := NewLease(cfg.AdvisoryDBPath())
+	lease.Register(st.DB)
+
 	// The shared gate ports serve whatever is configured to point at them, so
 	// there is no install session to attribute their decisions to — that is what
 	// `pkgwatch npm` is for, and it runs its own proxy on its own port.
-	gateCloser, err := serveGates(ctx, cfg)
+	gateCloser, err := serveGates(ctx, cfg, lease)
 	if err != nil {
 		return err
 	}
@@ -139,11 +146,17 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// The retroactive half. Without this the inventory only updates when someone
 	// remembers to type `pkgwatch scan`, which means the tool answers questions
 	// you already thought to ask.
-	go runPeriodicScans(ctx, cfg)
+	go runPeriodicScans(ctx, cfg, lease)
 
 	// Outbound only, and entirely optional. Nothing above waits on it, and an
 	// unreachable hub costs the agent nothing but a log line (§0, hard rule 1).
 	go runSync(ctx, cfg)
+
+	// The other half of staying current. A scan re-examines this machine against
+	// the advisories it holds; this is what makes those advisories move at all,
+	// and a machine matching a fresh inventory against a corpus that stopped
+	// ageing reports exactly as clean as one with nothing wrong.
+	go runBundleUpdates(ctx, cfg, lease)
 
 	srv, err := web.New(web.ModeAgent, st.Hostname)
 	if err != nil {
@@ -182,8 +195,17 @@ func Run(ctx context.Context, cfg config.Config) error {
 	srv.Events = st.Repo.Events
 	srv.OldestEvent = st.Repo.OldestEventAt
 	srv.HistoryDays = cfg.Agent.HistoryDays
+	// Guarded because these read through the attached advisory database, which a
+	// scheduled bundle update detaches for the moment it takes to swap the file.
+	// An unguarded read there sees a detached schema and reports no advisories,
+	// which is the one wrong answer this tool must never give.
 	srv.Findings = func(f repo.FindingFilter) ([]repo.Finding, bool, error) {
-		rows, err := st.Repo.OpenFindings(st.BundleAttached, f)
+		var rows []repo.Finding
+		err := lease.Read(func() error {
+			var err error
+			rows, err = st.Repo.OpenFindings(st.BundleAttached, f)
+			return err
+		})
 		return rows, st.BundleAttached, err
 	}
 	srv.Inventory = func(retired bool, limit int) ([]repo.PackageRow, error) {
@@ -207,7 +229,12 @@ func Run(ctx context.Context, cfg config.Config) error {
 		return session, decisions, withheld, err
 	}
 	srv.Ecosystems = func() (map[string]int, []string, error) {
-		counts, err := st.Repo.EcosystemCounts()
+		var counts map[string]int
+		err := lease.Read(func() error {
+			var err error
+			counts, err = st.Repo.EcosystemCounts()
+			return err
+		})
 		return counts, st.Bundle.Ecosystems, err
 	}
 	// Writes only on the agent. A hub renders another machine's findings, and
