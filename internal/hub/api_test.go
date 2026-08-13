@@ -38,7 +38,10 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(func() { handle.Close() })
 
 	h := &harness{
-		state: &State{DB: handle, Repo: repo.Hub{DB: handle}, Hostname: "test-hub"},
+		state: &State{
+			DB: handle, Repo: repo.Hub{DB: handle},
+			Hostname: "test-hub", BundleDir: t.TempDir(),
+		},
 		now:   time.Now(),
 	}
 	router := chi.NewRouter()

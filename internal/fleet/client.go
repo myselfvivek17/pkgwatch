@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -135,6 +136,71 @@ func (c *Client) post(path string, in, out any) error {
 		return nil
 	}
 	return json.Unmarshal(raw, out)
+}
+
+// get sends one signed read and returns the raw response body.
+//
+// Signed the same way a push is, over an empty body. The path is part of what
+// is signed, so a signature captured from a sync cannot be replayed onto a
+// fetch — and the hub applies exactly the same device check to both, which is
+// why a revoked machine stops receiving bundles as well as sending events.
+func (c *Client) get(path string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(c.BaseURL, "/")+path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	c.Identity.Sign(req, nil, c.now())
+
+	resp, err := c.client().Do(req)
+	if err != nil {
+		var wrongCert ErrWrongCertificate
+		if errors.As(err, &wrongCert) {
+			return nil, wrongCert
+		}
+		return nil, fmt.Errorf("reach hub at %s: %w", c.BaseURL, err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBundleBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read hub response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		apiErr := APIError{Status: resp.StatusCode}
+		var parsed ErrorResponse
+		if json.Unmarshal(raw, &parsed) == nil {
+			apiErr.Code, apiErr.Message = parsed.Code, parsed.Message
+		}
+		return nil, apiErr
+	}
+	return raw, nil
+}
+
+// maxBundleBytes bounds a relayed bundle. The published corpus is tens of
+// megabytes; this leaves room to grow and still refuses to read forever from
+// something answering on the hub's address.
+const maxBundleBytes = 256 << 20
+
+// Bundles lists what the hub is willing to relay.
+func (c *Client) Bundles() ([]BundleOffer, error) {
+	raw, err := c.get(PathBundles)
+	if err != nil {
+		return nil, err
+	}
+	var out BundleListResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse the hub's bundle list: %w", err)
+	}
+	return out.Bundles, nil
+}
+
+// FetchBundle downloads one bundle's bytes. The caller verifies them; nothing
+// about having asked the hub for them makes them trustworthy.
+func (c *Client) FetchBundle(file string) ([]byte, error) {
+	return c.get(PathBundles + "/" + url.PathEscape(file))
 }
 
 // Enroll exchanges a pairing code for a device token.

@@ -7,7 +7,11 @@
 // taken over can stop receiving, and cannot tell an agent to stop gating.
 package fleet
 
-import "time"
+import (
+	"time"
+
+	"github.com/myselfvivek17/pkgwatch/internal/bundle"
+)
 
 // APIBase is the versioned prefix every endpoint sits under. Versioned from
 // the start because an agent and its hub are upgraded on different days.
@@ -15,9 +19,32 @@ const APIBase = "/api/v1"
 
 // Endpoints.
 const (
-	PathEnroll = APIBase + "/enroll"
-	PathSync   = APIBase + "/sync"
+	PathEnroll  = APIBase + "/enroll"
+	PathSync    = APIBase + "/sync"
+	PathBundles = APIBase + "/bundles"
 )
+
+// BundleOffer is one advisory bundle the hub holds and will serve.
+//
+// The manifest travels with it, signature included, because that is what the
+// agent verifies against its own compiled-in publisher key. The hub relaying it
+// is a bandwidth cache and nothing more: it cannot make a bundle trusted, and a
+// hub that has been taken over cannot use this to push "everything is safe"
+// (§0, hard rule 2).
+type BundleOffer struct {
+	// File names the bundle for the fetch that follows. It is a convenience
+	// only — placement follows the scope inside the signed manifest, so a hub
+	// serving the npm bundle under a Debian name still lands as npm.
+	File     string          `json:"file"`
+	Manifest bundle.Manifest `json:"manifest"`
+}
+
+// BundleListResponse is what the hub offers. Empty is a normal answer: a hub
+// with no bundle of its own has nothing to relay, and says so rather than
+// leaving the agent to infer it from a 404.
+type BundleListResponse struct {
+	Bundles []BundleOffer `json:"bundles"`
+}
 
 // EnrollRequest pairs an agent with a hub.
 //

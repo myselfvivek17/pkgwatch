@@ -259,6 +259,11 @@ func handlePushError(store repo.Agent, err error, now time.Time) syncOutcome {
 	}
 }
 
+// HubClient builds a sync client from stored pairing state, or returns nil when
+// this agent has no hub. Exported for the CLI, which uses the same credentials
+// to pull relayed bundles as the daemon uses to push.
+func HubClient(store repo.Agent) (*fleet.Client, error) { return clientFor(store) }
+
 // clientFor builds the sync client from stored pairing state, or returns nil
 // when this agent has no hub — which is the normal, supported case.
 func clientFor(store repo.Agent) (*fleet.Client, error) {

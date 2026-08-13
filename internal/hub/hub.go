@@ -47,6 +47,10 @@ type State struct {
 	// normal state, not an error, and it says so rather than rendering blanks.
 	BundleAttached bool
 	Bundle         repo.BundleInfo
+
+	// BundleDir is what the relay serves from: the verified per-scope sources
+	// this hub installed, not the merged database it queries.
+	BundleDir string
 }
 
 func Open(cfg config.Config) (*State, error) {
@@ -54,7 +58,10 @@ func Open(cfg config.Config) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
-	st := &State{DB: handle, Repo: repo.Hub{DB: handle}, Hostname: hostname()}
+	st := &State{
+		DB: handle, Repo: repo.Hub{DB: handle},
+		Hostname: hostname(), BundleDir: cfg.BundleDir(),
+	}
 
 	// Same tolerance as the agent: a missing bundle is ordinary, and a bundle
 	// this build cannot read is worse than none — queries would fail inside the

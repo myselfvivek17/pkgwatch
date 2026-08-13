@@ -11,6 +11,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -110,6 +111,43 @@ func ScopeFileName(scope string) string {
 		safe = strings.ReplaceAll(safe, bad, "-")
 	}
 	return safe
+}
+
+// ManifestPath is where a staged bundle's manifest is kept: beside the bundle,
+// under the same name.
+//
+// Kept rather than discarded after verification, because a signature cannot be
+// re-derived. A hub that threw the manifest away could still hand an agent the
+// bytes, and the agent would have no way to check them against the publisher
+// key — which would leave "trust it, the hub sent it" as the only option, and
+// that is the exact thing hard rule 2 forbids.
+func ManifestPath(bundlePath string) string { return bundlePath + ".json" }
+
+// SaveManifest records a verified bundle's manifest beside it. The signature is
+// written inline so the file is self-contained.
+func SaveManifest(bundlePath string, m Manifest, sig []byte) error {
+	m.Signature = hex.EncodeToString(sig)
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("bundle: encode manifest: %w", err)
+	}
+	if err := os.WriteFile(ManifestPath(bundlePath), raw, 0o600); err != nil {
+		return fmt.Errorf("bundle: write manifest: %w", err)
+	}
+	return nil
+}
+
+// LoadManifest reads the manifest stored beside a bundle.
+func LoadManifest(bundlePath string) (Manifest, error) {
+	raw, err := os.ReadFile(ManifestPath(bundlePath))
+	if err != nil {
+		return Manifest{}, err
+	}
+	var m Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return Manifest{}, fmt.Errorf("bundle: parse stored manifest: %w", err)
+	}
+	return m, nil
 }
 
 // Digest returns the hex SHA-256 of data, as published in the manifest.

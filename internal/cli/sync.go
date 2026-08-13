@@ -16,6 +16,7 @@ import (
 	"github.com/myselfvivek17/pkgwatch/internal/bundle"
 	"github.com/myselfvivek17/pkgwatch/internal/config"
 	"github.com/myselfvivek17/pkgwatch/internal/db"
+	"github.com/myselfvivek17/pkgwatch/internal/fleet"
 	"github.com/myselfvivek17/pkgwatch/internal/repo"
 )
 
@@ -27,6 +28,9 @@ func syncCmd() *cobra.Command {
 		Use:   "sync",
 		Short: "Install advisory bundles",
 		Long: "Install one or more advisory bundles.\n\n" +
+			"With no flags, bundles are pulled from the hub this agent is paired with,\n" +
+			"which holds them so that one machine downloads the corpus and the rest copy\n" +
+			"it across the LAN.\n\n" +
 			"--file installs a single bundle. --dir installs every bundle in a directory,\n" +
 			"which is what the publisher's --split output is: one signed bundle per\n" +
 			"ecosystem and release, of which a machine takes only the ones it needs.\n\n" +
@@ -65,8 +69,9 @@ func syncCmd() *cobra.Command {
 					return err
 				}
 			default:
-				return fmt.Errorf("network sync lands with the hub in M5; " +
-					"use --file or --dir to install bundles you already have")
+				if err := installFromHub(cmd, cfg, allowDowngrade); err != nil {
+					return err
+				}
 			}
 
 			// A new bundle is one of the two events that can change what is true
@@ -140,6 +145,130 @@ func installDir(cmd *cobra.Command, cfg config.Config, dir string, allowDowngrad
 	return rebuildMerged(cmd, cfg)
 }
 
+// installFromHub pulls whatever the paired hub relays.
+//
+// The hub is a bandwidth cache: it saves every machine downloading the same
+// corpus, and it decides nothing. Each bundle goes through the same staging
+// path as one handed over on a USB stick — digest, signed scope, publisher
+// signature, anti-rollback — because a hub that has been taken over must not be
+// able to serve a bundle that says everything is fine (§0, hard rule 2).
+func installFromHub(cmd *cobra.Command, cfg config.Config, allowDowngrade bool) error {
+	client, err := hubClient(cfg)
+	if err != nil {
+		return err
+	}
+	if client == nil {
+		return fmt.Errorf("no bundle source: this agent is not paired with a hub, " +
+			"so there is nothing to pull from — use --file or --dir, or pair with `pkgwatch agent pair`")
+	}
+
+	offers, err := client.Bundles()
+	if err != nil {
+		return fmt.Errorf("ask the hub for its bundles: %w", err)
+	}
+	if len(offers) == 0 {
+		// Not an install of zero bundles. Nothing was replaced, and saying so
+		// matters: "sync succeeded" over an empty relay would read as up to date.
+		return fmt.Errorf("the hub holds no advisory bundles to relay — nothing was installed " +
+			"and this machine's advisories are unchanged. Give the hub a bundle with " +
+			"`pkgwatch sync --dir` on the hub machine")
+	}
+
+	held, err := heldBundleVersions(cfg)
+	if err != nil {
+		return err
+	}
+
+	out := cmd.OutOrStdout()
+	installed, current := 0, 0
+	offered := map[string]bool{}
+
+	for _, offer := range offers {
+		manifest := offer.Manifest
+		offered[manifest.Scope] = true
+
+		if have := held[manifest.Scope]; have != "" && manifest.Version <= have && !allowDowngrade {
+			current++
+			continue
+		}
+
+		data, err := client.FetchBundle(offer.File)
+		if err != nil {
+			return fmt.Errorf("fetch %s from the hub: %w", offer.File, err)
+		}
+		sig, err := hex.DecodeString(manifest.Signature)
+		if err != nil {
+			return fmt.Errorf("%s: signature in the hub's manifest is not hex: %w", offer.File, err)
+		}
+		// stageVerified places the bundle by the scope inside the signature, not
+		// by the name it was fetched under, so a hub serving the npm bundle as
+		// the Debian one still lands it as npm.
+		if err := stageVerified(cmd, cfg, data, manifest, sig, allowDowngrade); err != nil {
+			return fmt.Errorf("%s: %w", offer.File, err)
+		}
+		installed++
+	}
+
+	// A hub that relays four of the five scopes this machine holds leaves the
+	// fifth frozen at whatever it already had, and every other line of output
+	// here would read as "updated". Name them.
+	var missing []string
+	for scope := range held {
+		if !offered[scope] {
+			missing = append(missing, scope)
+		}
+	}
+	sort.Strings(missing)
+
+	fmt.Fprintf(out, "hub offered %d bundle(s): %d installed, %d already current\n",
+		len(offers), installed, current)
+	if len(missing) > 0 {
+		fmt.Fprintf(out, "NOT RELAYED: the hub carries no %s bundle, so that scope stays at "+
+			"the version this machine already had\n", strings.Join(missing, ", "))
+	}
+	if installed == 0 {
+		return nil
+	}
+	return rebuildMerged(cmd, cfg)
+}
+
+// heldBundleVersions reports the version of each scope already installed here.
+func heldBundleVersions(cfg config.Config) (map[string]string, error) {
+	sources, err := cfg.ScopedBundles()
+	if err != nil {
+		return nil, err
+	}
+
+	held := map[string]string{}
+	for _, path := range sources {
+		// The stored manifest names the scope as it was signed. Falling back to
+		// the filename would let a mis-stored bundle claim a scope it was never
+		// signed for, and the whole point of the anti-rollback check below is
+		// that it is per scope.
+		manifest, err := bundle.LoadManifest(path)
+		if err != nil || manifest.Scope == "" {
+			continue
+		}
+		held[manifest.Scope] = manifest.Version
+	}
+	return held, nil
+}
+
+// hubClient loads the pairing this agent already has, on its own handle.
+//
+// Opened and closed here rather than held across the staging that follows:
+// staging detaches and replaces the advisory database, and on Windows an open
+// handle blocks the rename outright.
+func hubClient(cfg config.Config) (*fleet.Client, error) {
+	handle, err := db.Open(cfg.AgentDBPath(), db.SchemaAgent)
+	if err != nil {
+		return nil, err
+	}
+	defer handle.Close()
+
+	return agent.HubClient(repo.Agent{DB: handle})
+}
+
 // installBundle stages one bundle and rebuilds the merged database.
 func installBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPath, sigPath string, allowDowngrade bool) error {
 	if err := stageBundle(cmd, cfg, bundlePath, manifestPath, sigPath, allowDowngrade); err != nil {
@@ -148,7 +277,8 @@ func installBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPa
 	return rebuildMerged(cmd, cfg)
 }
 
-// stageBundle verifies a bundle and stores it as a source, without rebuilding.
+// stageBundle verifies a bundle on disk and stores it as a source, without
+// rebuilding.
 func stageBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPath, sigPath string, allowDowngrade bool) error {
 	data, err := os.ReadFile(bundlePath)
 	if err != nil {
@@ -169,7 +299,18 @@ func stageBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPath
 	if err != nil {
 		return err
 	}
+	return stageVerified(cmd, cfg, data, manifest, sig, allowDowngrade)
+}
 
+// stageVerified is the one place a bundle becomes installed, whatever carried
+// it here — a file, a directory, or a relay from the hub.
+//
+// There is deliberately no shorter path for a bundle that came from your own
+// hub. The signature check below is identical in every case, because a hub is
+// a bandwidth cache and never a trust anchor (§0, hard rule 2): a hub that has
+// been taken over must not be able to serve a bundle claiming everything is
+// fine and have any agent believe it.
+func stageVerified(cmd *cobra.Command, cfg config.Config, data []byte, manifest bundle.Manifest, sig []byte, allowDowngrade bool) error {
 	if got := bundle.Digest(data); !strings.EqualFold(got, manifest.SHA256) {
 		return fmt.Errorf("REFUSING to install: bundle digest %s does not match the manifest's %s",
 			got, manifest.SHA256)
@@ -215,6 +356,12 @@ func stageBundle(cmd *cobra.Command, cfg config.Config, bundlePath, manifestPath
 	// throwing them away would mean re-downloading every other scope to change
 	// one of them.
 	if err := bundle.Install(scopePath, data); err != nil {
+		return err
+	}
+	// The manifest is kept beside the bundle because the signature cannot be
+	// re-derived, and without it this machine could pass the bundle on but
+	// nobody downstream could check it.
+	if err := bundle.SaveManifest(scopePath, manifest, sig); err != nil {
 		return err
 	}
 

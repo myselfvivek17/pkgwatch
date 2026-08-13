@@ -44,6 +44,11 @@ func deviceFrom(ctx context.Context) repo.Device {
 func (s *State) API(r chi.Router, now func() time.Time) {
 	r.Post(fleet.PathEnroll, s.handleEnroll(now))
 	r.Post(fleet.PathSync, s.requireDevice(now, s.handleSync(now)))
+
+	// Relay reads sit behind the same device check as a push, so revoking a
+	// machine cuts off both directions with one decision.
+	r.Get(fleet.PathBundles, s.requireDevice(now, s.handleBundleList))
+	r.Get(fleet.PathBundles+"/{file}", s.requireDevice(now, s.handleBundleFile))
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
