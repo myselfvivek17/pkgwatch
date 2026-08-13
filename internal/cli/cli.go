@@ -79,8 +79,8 @@ func Root() *cobra.Command {
 		findingsCmd(),
 		ackCmd(),
 		ignoreCmd(),
-		stub("quarantine <purl>", "Quarantine an installed package", "M6", cobra.ExactArgs(1)),
-		stub("restore <quarantine-id>", "Restore a quarantined package", "M6", cobra.ExactArgs(1)),
+		quarantineCmd(),
+		restoreCmd(),
 		stub("rotate <advisory-id>", "Print the credential rotation checklist", "M6", cobra.ExactArgs(1)),
 
 		stub("enable-script-guard", "Set ignore-scripts globally and seed the allowlist", "M6", cobra.NoArgs),

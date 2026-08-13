@@ -190,6 +190,8 @@ var kindLabels = map[string]string{
 	repo.EventPackageFiltered: "version withheld",
 	repo.EventSyncDropped:     "queue trimmed",
 	repo.EventSyncRefused:     "sync refused",
+	repo.EventQuarantine:      "quarantined",
+	repo.EventRestore:         "restored",
 }
 
 // buildRow turns a stored event into a display row.

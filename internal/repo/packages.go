@@ -2,6 +2,8 @@ package repo
 
 import (
 	"database/sql"
+	"errors"
+	"fmt"
 	"time"
 )
 
@@ -107,6 +109,32 @@ func (a Agent) UpsertPackages(packages []PackageRow, at time.Time) (inserted, up
 		}
 	}
 	return inserted, updated, tx.Commit()
+}
+
+// ErrNoSuchPackage means this machine has no live row for that purl.
+var ErrNoSuchPackage = errors.New("no such package is installed on this machine")
+
+// PackageByPURL returns one installed package.
+//
+// Retired rows are excluded. Acting on one would mean archiving or deleting a
+// path the scanner has already decided is not there, and the caller would be
+// told it succeeded.
+func (a Agent) PackageByPURL(purl string) (PackageRow, error) {
+	var pkg PackageRow
+	var hasScripts int
+	err := a.DB.QueryRow(`SELECT purl, ecosystem, name, version, install_path,
+		scope, has_scripts, COALESCE(path_mtime, 0)
+		FROM packages WHERE purl = ? AND gone_at IS NULL`, purl).
+		Scan(&pkg.PURL, &pkg.Ecosystem, &pkg.Name, &pkg.Version,
+			&pkg.InstallDir, &pkg.Scope, &hasScripts, &pkg.DirMTime)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PackageRow{}, fmt.Errorf("%w: %s", ErrNoSuchPackage, purl)
+	}
+	if err != nil {
+		return PackageRow{}, err
+	}
+	pkg.HasScripts = hasScripts != 0
+	return pkg, nil
 }
 
 // Packages returns what is installed now, ordered so two runs can be diffed.

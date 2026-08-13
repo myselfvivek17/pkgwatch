@@ -29,6 +29,13 @@ const (
 	// quiet week.
 	EventSyncDropped = "sync_dropped"
 
+	// EventQuarantine and EventRestore record the only two operations that add
+	// or remove files on the machine. Neither is routine: a person asked for
+	// them, they are the audit trail for a package that was taken away, and
+	// EventRestore is the one that says a known-bad package is back.
+	EventQuarantine = "quarantine"
+	EventRestore    = "restore"
+
 	// EventSyncRefused records the hub turning this device away for a reason
 	// retrying cannot fix — revoked, or no longer known. Recorded locally
 	// because a revoked agent that kept quietly retrying would look identical
