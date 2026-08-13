@@ -179,13 +179,29 @@ func installFromHub(cmd *cobra.Command, cfg config.Config, allowDowngrade bool) 
 		return err
 	}
 
+	wanted, err := scopesWorthHolding(cfg, held)
+	if err != nil {
+		return err
+	}
+
 	out := cmd.OutOrStdout()
 	installed, current := 0, 0
 	offered := map[string]bool{}
+	var skipped []string
 
 	for _, offer := range offers {
 		manifest := offer.Manifest
 		offered[manifest.Scope] = true
+
+		// A hub serves the whole fleet's scopes, and this machine is one member
+		// of it. Taking all of them would put the server's 137 MB of Ubuntu
+		// advisories on a Windows laptop and merge them into everything it
+		// queries — the split into per-scope bundles exists precisely so a
+		// machine carries only what it can match against.
+		if !wanted[manifest.Scope] {
+			skipped = append(skipped, manifest.Scope)
+			continue
+		}
 
 		if have := held[manifest.Scope]; have != "" && manifest.Version <= have && !allowDowngrade {
 			current++
@@ -220,8 +236,18 @@ func installFromHub(cmd *cobra.Command, cfg config.Config, allowDowngrade bool) 
 	}
 	sort.Strings(missing)
 
+	sort.Strings(skipped)
 	fmt.Fprintf(out, "hub offered %d bundle(s): %d installed, %d already current\n",
 		len(offers), installed, current)
+	if len(skipped) > 0 {
+		// Said out loud rather than silently narrowed. If a container appears
+		// later and this machine starts having packages from one of these, the
+		// next sync takes it — and until then "not taken" has to be visible, or
+		// an ecosystem nothing is watching looks like an ecosystem with nothing
+		// wrong.
+		fmt.Fprintf(out, "not taken: %s — no packages from those on this machine\n",
+			strings.Join(skipped, ", "))
+	}
 	if len(missing) > 0 {
 		fmt.Fprintf(out, "NOT RELAYED: the hub carries no %s bundle, so that scope stays at "+
 			"the version this machine already had\n", strings.Join(missing, ", "))
@@ -264,6 +290,37 @@ func scopesMissingFromMerged(cfg config.Config, held map[string]string) ([]strin
 	}
 	sort.Strings(missing)
 	return missing, nil
+}
+
+// scopesWorthHolding is what this machine can actually match against: the
+// scopes it already holds, plus every ecosystem its inventory names.
+//
+// Inventory rather than held-only, because a machine that has never held a
+// scope is exactly the one that needs it — a new container pulls in Alpine
+// packages and the Alpine bundle should arrive on the next sync rather than
+// waiting for someone to notice.
+func scopesWorthHolding(cfg config.Config, held map[string]string) (map[string]bool, error) {
+	wanted := map[string]bool{}
+	for scope := range held {
+		wanted[scope] = true
+	}
+
+	handle, err := db.Open(cfg.AgentDBPath(), db.SchemaAgent)
+	if err != nil {
+		return nil, err
+	}
+	defer handle.Close()
+
+	counts, err := repo.Agent{DB: handle}.EcosystemCounts()
+	if err != nil {
+		return nil, err
+	}
+	for ecosystem, n := range counts {
+		if n > 0 {
+			wanted[ecosystem] = true
+		}
+	}
+	return wanted, nil
 }
 
 // heldBundleVersions reports the version of each scope already installed here.
