@@ -30,6 +30,19 @@ if (-not (Test-Path $BinaryPath)) {
 $action = New-ScheduledTaskAction -Execute $BinaryPath -Argument "agent"
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 
+# S4U, not Interactive.
+#
+# An interactive task runs inside the desktop session, so a console program gets
+# a console window - and closing that window kills the agent. A watchdog you can
+# stop by tidying up your taskbar is not a watchdog, and the window is the kind
+# of thing people close without realising what it was.
+#
+# S4U still runs as this user, which is what the inventory and the credential
+# checks need: they look at this account's home directory, its npm globals and
+# its .ssh. It simply runs without a desktop, so there is no window to close.
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
+    -LogonType S4U -RunLevel Limited
+
 # Repeat the logon trigger forever, every five minutes.
 #
 # This is not belt and braces, it is the only thing that restarts the agent
@@ -57,12 +70,37 @@ $settings = New-ScheduledTaskSettingsSet `
     -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1)
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-    -Settings $settings -Description "pkgwatch supply-chain agent" -Force | Out-Null
+# S4U registration needs elevation. Try it, and if it is refused fall back to an
+# interactive task rather than failing the install - but say plainly what the
+# difference is, because the fallback leaves a console window that stops the
+# agent when it is closed, and a person who does not know that will close it.
+$windowless = $true
+try {
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+        -Principal $principal -Settings $settings `
+        -Description "pkgwatch supply-chain agent" -Force -ErrorAction Stop | Out-Null
+} catch {
+    $windowless = $false
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
+        -Settings $settings -Description "pkgwatch supply-chain agent" -Force | Out-Null
+}
 
 Start-ScheduledTask -TaskName $TaskName
 
 Write-Host "Registered and started '$TaskName'."
+
+if ($windowless) {
+    Write-Host "Runs without a console window (S4U)."
+} else {
+    Write-Host ""
+    Write-Host "WARNING: registered as an INTERACTIVE task, because making it windowless"
+    Write-Host "needs elevation. A console window will appear at logon, and CLOSING THAT"
+    Write-Host "WINDOW STOPS THE AGENT - the gate goes down with it, silently."
+    Write-Host ""
+    Write-Host "To fix it, run this once from an elevated PowerShell:"
+    Write-Host "  powershell -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+}
+
 # `pkgwatch health` over the task state on purpose: the state says Ready with
 # LastTaskResult 0 whether or not anything is listening.
 Write-Host "Health check: pkgwatch health"
