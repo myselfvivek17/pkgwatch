@@ -467,6 +467,126 @@ func TestASnapshotCarriesClosure(t *testing.T) {
 	}
 }
 
+// Rotation and quarantine replicate on the same snapshot terms as findings.
+//
+// Unticking and restoring are both removals, so the same closure argument
+// applies: a hub that could only ever add would show a rotation as finished
+// after somebody decided it was not, and hold a quarantine row for a package
+// already back on disk.
+func TestRotationAndQuarantineReplicateAsSnapshots(t *testing.T) {
+	h := newHarness(t)
+	id, resp := h.enrol(t)
+	if err := h.state.Repo.SetDeviceStatus(id.ID(), repo.DeviceStatusApproved, h.now); err != nil {
+		t.Fatal(err)
+	}
+	client := h.client(id, resp.Token)
+
+	out, err := client.Push(fleet.SyncRequest{
+		Version: "test",
+		Rotation: []fleet.RotationTick{
+			{PURL: "pkg:npm/a@1", AdvisoryID: "MAL-1", ItemID: "ssh", CheckedAt: h.now},
+			{PURL: "pkg:npm/a@1", AdvisoryID: "MAL-1", ItemID: "aws"},
+		},
+		RotationComplete: true,
+		Quarantine: []fleet.Quarantined{
+			{ID: "q1", PURL: "pkg:npm/a@1", State: repo.QuarantineActive, At: h.now},
+		},
+		QuarantineComplete: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Rotation != 2 || out.Quarantine != 1 {
+		t.Fatalf("stored rotation=%d quarantine=%d, want 2 and 1", out.Rotation, out.Quarantine)
+	}
+
+	ticks, err := h.state.Repo.FleetRotation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The unticked row travels too: "one of two done" and "one done, one
+	// unknown" are different claims about the same machine.
+	var checked int
+	for _, tick := range ticks {
+		if !tick.CheckedAt.IsZero() {
+			checked++
+		}
+	}
+	if len(ticks) != 2 || checked != 1 {
+		t.Errorf("ticks = %d with %d checked, want 2 and 1", len(ticks), checked)
+	}
+
+	// Unticking everything and restoring the package: both must reach the hub.
+	if _, err := client.Push(fleet.SyncRequest{
+		Version:            "test",
+		Rotation:           []fleet.RotationTick{{PURL: "pkg:npm/a@1", AdvisoryID: "MAL-1", ItemID: "ssh"}},
+		RotationComplete:   true,
+		Quarantine:         nil,
+		QuarantineComplete: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ticks, err = h.state.Repo.FleetRotation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ticks) != 1 || !ticks[0].CheckedAt.IsZero() {
+		t.Errorf("ticks = %+v, want one row with the tick cleared", ticks)
+	}
+	rows, err := h.state.Repo.FleetQuarantine(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("quarantine = %d rows, want 0 — a restore has to be able to reach the hub", len(rows))
+	}
+}
+
+// A truncated response snapshot must not be applied as a complete one, for the
+// same reason findings must not: the replace deletes whatever it left out, and
+// here that erases work somebody actually did.
+func TestAnIncompleteResponseSnapshotIsNotAppliedAsOne(t *testing.T) {
+	h := newHarness(t)
+	id, resp := h.enrol(t)
+	if err := h.state.Repo.SetDeviceStatus(id.ID(), repo.DeviceStatusApproved, h.now); err != nil {
+		t.Fatal(err)
+	}
+	client := h.client(id, resp.Token)
+
+	if _, err := client.Push(fleet.SyncRequest{
+		Version:            "test",
+		Rotation:           []fleet.RotationTick{{PURL: "pkg:npm/a@1", AdvisoryID: "MAL-1", ItemID: "ssh", CheckedAt: h.now}},
+		RotationComplete:   true,
+		Quarantine:         []fleet.Quarantined{{ID: "q1", PURL: "pkg:npm/a@1", State: repo.QuarantineActive, At: h.now}},
+		QuarantineComplete: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := client.Push(fleet.SyncRequest{
+		Version:            "test",
+		Rotation:           nil,
+		RotationComplete:   false,
+		Quarantine:         nil,
+		QuarantineComplete: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ticks, err := h.state.Repo.FleetRotation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := h.state.Repo.FleetQuarantine(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ticks) != 1 || len(rows) != 1 {
+		t.Errorf("ticks=%d quarantine=%d, want both still on file", len(ticks), len(rows))
+	}
+}
+
 // Inventory is volunteered by the agent but gated by the hub's record of the
 // level, so a compromised agent cannot start sending a map of exploitable
 // software on its machine (§3.3).

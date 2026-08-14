@@ -101,6 +101,43 @@ func (s *State) handleSync(now func() time.Time) http.HandlerFunc {
 			}
 		}
 
+		// Rotation and quarantine, on the same completeness terms as findings and
+		// for the same reason: a truncated set applied as a replacement deletes
+		// what it left out, and here that renders unfinished work as finished.
+		if req.RotationComplete {
+			ticks := make([]repo.FleetRotationTick, 0, len(req.Rotation))
+			for _, t := range req.Rotation {
+				ticks = append(ticks, repo.FleetRotationTick{
+					PURL: t.PURL, AdvisoryID: t.AdvisoryID,
+					ItemID: t.ItemID, CheckedAt: t.CheckedAt,
+				})
+			}
+			if resp.Rotation, err = s.Repo.ReplaceRotation(dev.ID, ticks); err != nil {
+				slog.Error("could not store fleet rotation", "device", dev.ID, "error", err)
+				refuse(w, http.StatusInternalServerError, fleet.CodeBadRequest, "could not store rotation")
+				return
+			}
+		} else if len(req.Rotation) > 0 {
+			slog.Warn("ignored a partial rotation snapshot", "device", dev.ID, "count", len(req.Rotation))
+		}
+
+		if req.QuarantineComplete {
+			items := make([]repo.FleetQuarantineRow, 0, len(req.Quarantine))
+			for _, q := range req.Quarantine {
+				items = append(items, repo.FleetQuarantineRow{
+					ID: q.ID, PURL: q.PURL, AdvisoryID: q.AdvisoryID, State: q.State,
+					OriginPath: q.OriginPath, At: q.At, RestoredAt: q.RestoredAt,
+				})
+			}
+			if resp.Quarantine, err = s.Repo.ReplaceQuarantine(dev.ID, items); err != nil {
+				slog.Error("could not store fleet quarantine", "device", dev.ID, "error", err)
+				refuse(w, http.StatusInternalServerError, fleet.CodeBadRequest, "could not store quarantine")
+				return
+			}
+		} else if len(req.Quarantine) > 0 {
+			slog.Warn("ignored a partial quarantine snapshot", "device", dev.ID, "count", len(req.Quarantine))
+		}
+
 		// Touched last, and only on success. last_seen_at is what the fleet page
 		// reads to decide a machine is reporting; setting it on a push that then
 		// failed to store anything would render a broken agent as healthy.

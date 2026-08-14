@@ -100,6 +100,19 @@ func (a Agent) QuarantineItems(limit int) ([]QuarantineItem, error) {
 	return out, rows.Err()
 }
 
+// quarantineSyncCap bounds one push. Far above any real machine's count — a
+// person quarantines packages one at a time — and here only so a corrupt table
+// cannot produce an unbounded request body.
+const quarantineSyncCap = 5_000
+
+// SyncableQuarantine returns what to send the hub, and whether that is all of
+// it. The second value gates the hub's replace: a truncated snapshot applied as
+// a complete one would delete every row past the cap.
+func (a Agent) SyncableQuarantine() ([]QuarantineItem, bool, error) {
+	items, err := a.QuarantineItems(quarantineSyncCap)
+	return items, len(items) < quarantineSyncCap, err
+}
+
 // QuarantineItem returns one row by id.
 func (a Agent) QuarantineItem(id string) (QuarantineItem, error) {
 	row := a.DB.QueryRow(`SELECT id, purl, origin_path, archive_path, sha256,

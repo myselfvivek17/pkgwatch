@@ -192,6 +192,20 @@ func Run(ctx context.Context, cfg config.Config) error {
 		return rows, st.BundleAttached, err
 	}
 
+	// The response pages, read-only, over what the agents have replicated.
+	//
+	// Deliberately not the agent's hooks: those read this box's own home
+	// directory and quarantine archive, and on a hub that would report the
+	// server's credentials as the fleet's. There is no write path here at all —
+	// sync is outbound-only, so a tick or a restore entered on the hub would
+	// have no way to reach the machine that owns the files.
+	srv.FleetExposures = func() ([]repo.FleetExposure, bool, error) {
+		rows, err := st.Repo.FleetMalwareFindings(st.BundleAttached)
+		return rows, st.BundleAttached, err
+	}
+	srv.FleetRotation = st.Repo.FleetRotation
+	srv.FleetQuarantine = st.Repo.FleetQuarantine
+
 	router := chi.NewRouter()
 	router.Get("/health", daemon.HealthHandler("hub", started, func() (bool, string) {
 		return st.DB.PingContext(ctx) == nil, st.Bundle.Version

@@ -101,26 +101,69 @@ func TestAnUnknownChecklistItemIsRefused(t *testing.T) {
 	}
 }
 
-// A hub has none of these files, so it has no business serving either page.
-// Disabling the nav item is not enough on its own — a disabled link still
-// leaves the route reachable by typing it — so the routes are registered from
-// the same hooks the nav is derived from, and both must be absent together.
-func TestTheHubServesNeitherPage(t *testing.T) {
-	srv, err := New(ModeHub, "hub")
-	if err != nil {
-		t.Fatal(err)
-	}
-	srv.Overview = func() (OverviewData, error) { return OverviewData{Mode: "hub"}, nil }
-
-	r := chi.NewRouter()
-	srv.Routes(r)
+// The hub shows both pages and can write to neither.
+//
+// The write paths are the assertion that matters. Sync is outbound-only, so a
+// tick or a restore entered on the hub has no channel to reach the machine that
+// owns the files — a control that appeared to work would be recording rotations
+// nobody performed.
+func TestTheHubServesBothPagesReadOnly(t *testing.T) {
+	h := hubServer(t)
 
 	for _, path := range []string{"/rotate", "/quarantine"} {
-		rec := httptest.NewRecorder()
-		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("%s answered %d on a hub, want 404", path, rec.Code)
+		if code := get(t, h, path).Code; code != http.StatusOK {
+			t.Errorf("GET %s answered %d on a hub, want 200", path, code)
 		}
+	}
+
+	for _, path := range []string{"/rotate/check", "/quarantine/restore"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(""))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+
+		if rec.Code == http.StatusOK || rec.Code == http.StatusSeeOther {
+			t.Errorf("POST %s answered %d on a hub — the write path must not exist", path, rec.Code)
+		}
+	}
+}
+
+// The hub renders whose machine it is and how to get there, and never a bare
+// link: agent dashboards bind loopback, so an anchor would be dead from the hub.
+func TestTheHubSaysWhichMachineOwesTheWork(t *testing.T) {
+	h := hubServer(t)
+	body := get(t, h, "/rotate").Body.String()
+
+	for _, want := range []string{"laptop", "ssh -L 4875:127.0.0.1:4875 laptop"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%q is missing from the hub's rotation page", want)
+		}
+	}
+	// One ticked, one not: the count is evidence about a machine this hub
+	// cannot see, so it has to come from the replicated rows.
+	if !strings.Contains(body, "1 / 2 rotated") {
+		t.Error("the replicated progress count is wrong or missing")
+	}
+	if strings.Contains(body, `action="/rotate/check"`) {
+		t.Error("the hub rendered a form that posts to a route it does not serve")
+	}
+	if !strings.Contains(body, "</html>") {
+		t.Error("the page stopped before the end of the document")
+	}
+}
+
+// A quarantine row replicated at findings level carries no path, and the page
+// must not render that as a package taken from nowhere.
+func TestAWithheldPathSaysSoOnTheHub(t *testing.T) {
+	h := hubServer(t)
+	body := get(t, h, "/quarantine").Body.String()
+
+	if !strings.Contains(body, "not replicated at this sync level") {
+		t.Error("a withheld origin path rendered as an empty cell")
+	}
+	if strings.Contains(body, ">restore<") {
+		t.Error("the hub offered a restore it cannot perform")
 	}
 }
 

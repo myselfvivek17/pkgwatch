@@ -192,6 +192,25 @@ func Detect(home string) []Item {
 	return items
 }
 
+// Describe names a credential from its stored ID alone, without looking at any
+// filesystem.
+//
+// The hub needs this: it holds ticks replicated from machines whose home
+// directories it cannot see, and rendering a bare "github-cli" would make the
+// page a lookup table. An unknown ID is returned as itself rather than dropped —
+// a tick against a credential this build no longer knows about is still work
+// somebody did, and silently omitting it would shorten the checklist.
+func Describe(id string) Item {
+	for _, c := range candidates {
+		if c.id == id {
+			return Item{ID: c.id, Label: c.label, Category: c.category,
+				RotateURL: c.rotateURL, Why: c.why}
+		}
+	}
+	return Item{ID: id, Label: id, Category: "unknown",
+		Why: "recorded by an agent that knows this credential and this build does not"}
+}
+
 // fileContains reports whether a marker appears in a small config file.
 //
 // Capped rather than streamed: these are configuration files of a few

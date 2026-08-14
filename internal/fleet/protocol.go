@@ -104,6 +104,36 @@ type Package struct {
 	LastSeen  time.Time `json:"last_seen"`
 }
 
+// RotationTick is one credential the machine has (or has not) rotated after
+// running malicious code.
+//
+// Sent at sync_level = findings, alongside the finding it belongs to. A tick
+// names a credential *category* that exists on the machine — "aws", "ssh" —
+// which is metadata about a finding the hub already holds, not a list of
+// installed software. The inventory gate does not apply.
+type RotationTick struct {
+	PURL       string    `json:"purl"`
+	AdvisoryID string    `json:"advisory_id"`
+	ItemID     string    `json:"item_id"`
+	CheckedAt  time.Time `json:"checked_at,omitzero"`
+}
+
+// Quarantined is one package this machine has moved out of the way.
+//
+// OriginPath is omitted below sync_level = full: it is a filesystem path, which
+// is inventory-shaped. The rest of the row travels at findings level, because a
+// hub that cannot see a package was quarantined would show a machine as still
+// exposed when it has already acted.
+type Quarantined struct {
+	ID         string    `json:"id"`
+	PURL       string    `json:"purl"`
+	AdvisoryID string    `json:"advisory_id,omitempty"`
+	State      string    `json:"state"`
+	OriginPath string    `json:"origin_path,omitempty"`
+	At         time.Time `json:"at"`
+	RestoredAt time.Time `json:"restored_at,omitzero"`
+}
+
 // SyncRequest is one push.
 //
 // Events are incremental against the agent's own cursor. Findings are a full
@@ -118,10 +148,23 @@ type SyncRequest struct {
 	Findings  []Finding `json:"findings"`
 	Packages  []Package `json:"packages,omitempty"`
 
+	// Rotation and Quarantine are snapshots too, for the same reason findings
+	// are: unticking a checklist item and restoring a package are both removals,
+	// and a delta can only ever add.
+	Rotation   []RotationTick `json:"rotation,omitempty"`
+	Quarantine []Quarantined  `json:"quarantine,omitempty"`
+
 	// FindingsComplete says whether Findings is the whole set. A truncated
 	// snapshot must not be treated as one, or the hub deletes everything the
 	// push happened to leave out.
 	FindingsComplete bool `json:"findings_complete"`
+
+	// One flag each, deliberately not folded into FindingsComplete. They are
+	// read from different tables and could be truncated independently, and a
+	// shared flag would let a complete findings read vouch for a partial
+	// rotation read — which is exactly the deletion this guard exists to stop.
+	RotationComplete   bool `json:"rotation_complete"`
+	QuarantineComplete bool `json:"quarantine_complete"`
 }
 
 // SyncResponse acknowledges a push.
@@ -134,6 +177,8 @@ type SyncResponse struct {
 	Events          int   `json:"events"`
 	Findings        int   `json:"findings"`
 	Packages        int   `json:"packages"`
+	Rotation        int   `json:"rotation"`
+	Quarantine      int   `json:"quarantine"`
 }
 
 // ErrorResponse is what every refusal carries.

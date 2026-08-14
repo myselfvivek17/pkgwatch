@@ -6,24 +6,38 @@
   {{if not .Items}}
     <div class="pw-card">
       <p class="pw-muted">
-        Nothing is quarantined on this machine. <span class="pw-mono">pkgwatch quarantine &lt;purl&gt;</span>
-        archives a package, checks the archive can be read back, and only then deletes the original.
+        {{if .ReadOnly}}
+          No machine has reported a quarantined package. Machines report this with their findings,
+          so a machine that has never synced is absent from this list rather than empty in it —
+          check the pairing page for anything not reporting.
+        {{else}}
+          Nothing is quarantined on this machine.
+          <span class="pw-mono">pkgwatch quarantine &lt;purl&gt;</span>
+          archives a package, checks the archive can be read back, and only then deletes the original.
+        {{end}}
       </p>
     </div>
   {{else}}
     <table class="pw-table">
       <thead>
-        <tr><th>id</th><th>state</th><th>when</th><th>package</th><th>taken from</th>
+        <tr>{{if .ReadOnly}}<th>machine</th>{{end}}<th>id</th><th>state</th><th>when</th>
+          <th>package</th><th>taken from</th>
           {{if .CanRestore}}<th></th>{{end}}</tr>
       </thead>
       <tbody>
         {{range .Items}}
         <tr{{if eq .State "failed"}} class="pw-row-alarming"{{end}}>
+          {{if $.Data.ReadOnly}}<td>{{.Device}}</td>{{end}}
           <td class="pw-mono">{{.ID}}</td>
           <td><span class="pw-qstate pw-qstate-{{.State}}">{{.State}}</span></td>
           <td class="pw-mono pw-dim">{{.When}}</td>
           <td class="pw-mono pw-wrap">{{.PURL}}</td>
-          <td class="pw-mono pw-wrap pw-dim">{{.OriginPath}}</td>
+          {{/* An empty cell would read as "taken from nowhere". At sync level
+               findings the path never left the machine, and that is a different
+               fact from not having one. */}}
+          <td class="pw-mono pw-wrap pw-dim">
+            {{if .PathHeld}}{{.OriginPath}}{{else}}<span class="pw-muted">not replicated at this sync level</span>{{end}}
+          </td>
           {{if $.Data.CanRestore}}
           <td class="pw-triage">
             {{if .Restorable}}
@@ -60,6 +74,13 @@
         Findings for a quarantined package stay open. It is one restore away from being back, so a
         count that dropped here would show this machine clean while the package sits in the archive.
       </p>
+      {{if .ReadOnly}}
+      <p class="pw-muted">
+        This is a replica. The archives are files on the machines that made them and sync only runs
+        one way, so a restore has to be run there — on that machine's own dashboard, or with
+        <span class="pw-mono">pkgwatch restore &lt;id&gt;</span>.
+      </p>
+      {{end}}
     </div>
   {{end}}
   {{end}}

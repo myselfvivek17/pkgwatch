@@ -23,6 +23,11 @@ type RotateData struct {
 	// nothing to rotate *for* yet. Knowing what a postinstall script could read
 	// is worth having before anything goes wrong.
 	Credentials []rotate.Item
+
+	// ReadOnly is the hub's view. The credentials being rotated are files on
+	// each agent and sync is outbound-only (§7), so the hub has no channel to
+	// write a tick back down — a checkbox here would be a button that lies.
+	ReadOnly bool
 }
 
 // Exposure is one malware finding and its checklist.
@@ -41,6 +46,19 @@ type Exposure struct {
 	Done    int
 	Total   int
 	Percent int
+
+	// Device and Reach are the hub's columns: which machine owes this work, and
+	// how to get to the dashboard that can record it. Agent dashboards bind
+	// loopback, so a plain link to the machine would be dead from anywhere else —
+	// which is a link that fails silently, the thing this project keeps refusing
+	// to ship.
+	Device string
+	Reach  string
+
+	// Started is false when the hub holds no ticks for this exposure at all.
+	// Zero of five and nothing-recorded are different claims, and only one of
+	// them is evidence about what the machine has done.
+	Started bool
 }
 
 // RotateRow is one credential in one exposure's checklist.
@@ -92,6 +110,74 @@ func (s *Server) handleRotate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.render(w, "rotate", "Credential rotation", "credentials", data)
+}
+
+// handleFleetRotate is the hub's read-only view of the same page.
+//
+// Built from the fleet's malware findings rather than from the replicated ticks:
+// a tick row only exists once somebody has started, so a page driven by ticks
+// would be blank for the one machine that has done nothing about its malware.
+func (s *Server) handleFleetRotate(w http.ResponseWriter, r *http.Request) {
+	exposures, attached, err := s.FleetExposures()
+	if err != nil {
+		http.Error(w, "rotation unavailable: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	ticks, err := s.FleetRotation()
+	if err != nil {
+		http.Error(w, "rotation progress unavailable: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Keyed by device as well as finding: the same malicious package on two
+	// machines is two rotations, and merging them would let one machine's work
+	// mark the other's done.
+	type key struct{ device, purl, advisory string }
+	byExposure := map[key][]repo.FleetRotationTick{}
+	for _, t := range ticks {
+		k := key{t.DeviceID, t.PURL, t.AdvisoryID}
+		byExposure[k] = append(byExposure[k], t)
+	}
+
+	data := RotateData{BundleMissing: !attached, ReadOnly: true}
+	for _, e := range exposures {
+		exposure := Exposure{
+			PURL:       e.PURL,
+			AdvisoryID: e.AdvisoryID,
+			Summary:    e.Summary,
+			Found:      e.DetectedAt.Format("2 Jan 2006, 15:04"),
+			Device:     e.Hostname,
+			Reach:      reachCommand(e.Hostname),
+		}
+		for _, t := range byExposure[key{e.DeviceID, e.PURL, e.AdvisoryID}] {
+			row := RotateRow{Item: rotate.Describe(t.ItemID)}
+			if !t.CheckedAt.IsZero() {
+				row.Checked, row.CheckedAt = true, t.CheckedAt.Format("2 Jan, 15:04")
+				exposure.Done++
+			}
+			exposure.Items = append(exposure.Items, row)
+		}
+		exposure.Total = len(exposure.Items)
+		exposure.Started = exposure.Total > 0
+		if exposure.Total > 0 {
+			exposure.Percent = exposure.Done * 100 / exposure.Total
+		}
+		data.Exposures = append(data.Exposures, exposure)
+	}
+
+	s.render(w, "rotate", "Credential rotation", "credentials", data)
+}
+
+// reachCommand is how to open a machine's own dashboard from here.
+//
+// A hint, not a guarantee: it assumes the hostname resolves over SSH and the
+// agent is on its default port. Printed as a command rather than an anchor
+// precisely because it may not work — a dead hyperlink says nothing about why.
+func reachCommand(hostname string) string {
+	if hostname == "" {
+		return ""
+	}
+	return fmt.Sprintf("ssh -L 4875:127.0.0.1:4875 %s", hostname)
 }
 
 // exposureWindow says how long the package was here, in the terms that decide
@@ -171,6 +257,10 @@ type QuarantineData struct {
 	// that were taken, the other means they cannot come back at all.
 	Failed  int
 	Missing int
+
+	// ReadOnly is the hub's view: it holds a replica, and the archive itself is
+	// on the machine that made it.
+	ReadOnly bool
 }
 
 // QuarantineRow is one archived package.
@@ -178,6 +268,15 @@ type QuarantineRow struct {
 	repo.QuarantineItem
 	When       string
 	Restorable bool
+
+	// Device names the machine, on the hub. Empty on an agent, where there is
+	// only one machine and a column repeating its name is noise.
+	Device string
+
+	// PathHeld is false when the origin path did not cross the wire — the row is
+	// replicated at findings level, where a filesystem path is withheld. Without
+	// this the page cannot tell "taken from nowhere" from "not replicated".
+	PathHeld bool
 }
 
 func (s *Server) handleQuarantine(w http.ResponseWriter, r *http.Request) {
@@ -193,8 +292,45 @@ func (s *Server) handleQuarantine(w http.ResponseWriter, r *http.Request) {
 			QuarantineItem: item,
 			When:           item.At.Format("2 Jan 2006, 15:04"),
 			Restorable:     item.Restorable(),
+			PathHeld:       true,
 		})
 		switch item.State {
+		case repo.QuarantineFailed:
+			data.Failed++
+		case repo.QuarantineMissing:
+			data.Missing++
+		}
+	}
+
+	s.render(w, "quarantine", "Quarantine", "quarantine", data)
+}
+
+// handleFleetQuarantine is the hub's read-only replica of the same list.
+//
+// No restore button, and not merely because the hook is nil: the archive is a
+// file on the machine that made it, and sync is outbound-only, so there is no
+// channel to ask for it back. The page says so rather than leaving a disabled
+// control to be read as "broken".
+func (s *Server) handleFleetQuarantine(w http.ResponseWriter, r *http.Request) {
+	items, err := s.FleetQuarantine(100)
+	if err != nil {
+		http.Error(w, "quarantine unavailable: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	data := QuarantineData{ReadOnly: true}
+	for _, q := range items {
+		data.Items = append(data.Items, QuarantineRow{
+			QuarantineItem: repo.QuarantineItem{
+				ID: q.ID, PURL: q.PURL, OriginPath: q.OriginPath,
+				AdvisoryID: q.AdvisoryID, State: q.State,
+				At: q.At, RestoredAt: q.RestoredAt,
+			},
+			When:     q.At.Format("2 Jan 2006, 15:04"),
+			Device:   q.Hostname,
+			PathHeld: q.PathReplicated,
+		})
+		switch q.State {
 		case repo.QuarantineFailed:
 			data.Failed++
 		case repo.QuarantineMissing:

@@ -62,14 +62,16 @@ func (s *Server) nav(active string) []NavItem {
 		{Key: "block", Label: "Install block", Href: "/sessions",
 			Enabled: s.Sessions != nil && s.SessionReport != nil},
 		{Key: "credentials", Label: "Credential rotation", Href: "/rotate",
-			Enabled: s.Exposures != nil && s.Credentials != nil},
+			Enabled: (s.Exposures != nil && s.Credentials != nil) ||
+				(s.FleetExposures != nil && s.FleetRotation != nil)},
 		{Key: "inventory", Label: "Inventory", Href: "/inventory",
 			Enabled: s.Inventory != nil && s.Ecosystems != nil},
 		{Key: "pairing", Label: "Device pairing", Href: "/devices", Enabled: s.Devices != nil},
 		{Key: "search", Label: "Package search", Href: "/search",
 			Enabled: s.SearchPackages != nil && s.InventoryCoverage != nil},
 		{Key: "settings", Label: "Settings", Href: "/settings"},
-		{Key: "quarantine", Label: "Quarantine", Href: "/quarantine", Enabled: s.Quarantined != nil},
+		{Key: "quarantine", Label: "Quarantine", Href: "/quarantine",
+			Enabled: s.Quarantined != nil || s.FleetQuarantine != nil},
 	}
 	for i := range items {
 		items[i].Active = items[i].Key == active
@@ -162,6 +164,15 @@ type Server struct {
 	// back. Restore is separate because it is the write, and a hub never has it.
 	Quarantined func(limit int) ([]repo.QuarantineItem, error)
 	Restore     func(id string) error
+
+	// FleetExposures, FleetRotation and FleetQuarantine back the hub's read-only
+	// versions of those two pages. Separate hooks over separate tables rather
+	// than the agent's with a mode flag: these read replicas of other machines'
+	// state, and wiring them to the local readers would have a hub reporting its
+	// own home directory as the fleet's.
+	FleetExposures  func() ([]repo.FleetExposure, bool, error)
+	FleetRotation   func() ([]repo.FleetRotationTick, error)
+	FleetQuarantine func(limit int) ([]repo.FleetQuarantineRow, error)
 
 	// Devices, DeviceFindings and SetDeviceStatus back the fleet and pairing
 	// pages. Set on a hub only; an agent has no fleet, and its overview stays
@@ -329,17 +340,27 @@ func (s *Server) Routes(r chi.Router) {
 			r.Get("/sessions", s.handleSessions)
 			r.Get("/sessions/{id}", s.handleSessionReport)
 		}
-		if s.Exposures != nil && s.Credentials != nil {
+		// Read paths first, write paths nested inside them. The hub reaches the
+		// same two pages through its own handlers and never registers a POST at
+		// all: it holds replicas, and there is no channel to write a tick or a
+		// restore back down to the machine that owns the state (§7).
+		switch {
+		case s.Exposures != nil && s.Credentials != nil:
 			r.Get("/rotate", s.handleRotate)
 			if s.SetRotationChecked != nil {
 				r.Post("/rotate/check", guard(s.handleRotateCheck))
 			}
+		case s.FleetExposures != nil && s.FleetRotation != nil:
+			r.Get("/rotate", s.handleFleetRotate)
 		}
-		if s.Quarantined != nil {
+		switch {
+		case s.Quarantined != nil:
 			r.Get("/quarantine", s.handleQuarantine)
 			if s.Restore != nil {
 				r.Post("/quarantine/restore", guard(s.handleRestore))
 			}
+		case s.FleetQuarantine != nil:
+			r.Get("/quarantine", s.handleFleetQuarantine)
 		}
 		if s.Findings != nil {
 			r.Get("/findings", s.handleFindings)

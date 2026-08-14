@@ -14,8 +14,13 @@
     <div class="pw-card">
       <div class="pw-section-title">Nothing to rotate</div>
       <p class="pw-muted">
-        Rotation follows from code having run as you, not from a package being vulnerable. No open
-        malware findings on this machine.
+        Rotation follows from code having run as you, not from a package being vulnerable.
+        {{if .ReadOnly}}
+          No open malware findings on any machine that has reported. A machine that has stopped
+          syncing is not represented here at all — the pairing page is where that shows.
+        {{else}}
+          No open malware findings on this machine.
+        {{end}}
       </p>
     </div>
 
@@ -53,17 +58,26 @@
                case-sensitive — "@Ctrl/TinyColor" is a different package from the
                one that was found. */}}
           <div class="pw-exposure-purl pw-mono">{{.PURL}}</div>
-          <div class="pw-muted pw-mono pw-dim">{{.AdvisoryID}} · found {{.Found}}</div>
+          <div class="pw-muted pw-mono pw-dim">
+            {{if .Device}}{{.Device}} · {{end}}{{.AdvisoryID}} · found {{.Found}}
+          </div>
           {{if .Summary}}<div class="pw-muted">{{.Summary}}</div>{{end}}
           {{/* The window is what decides how much of the list matters, so it
                sits with the package rather than in a footnote. */}}
           {{if .Window}}<div class="pw-muted">{{.Window}}</div>{{end}}
         </div>
         <div class="pw-exposure-progress">
+          {{/* On the hub, "0 / 0" and "nothing recorded" are different claims:
+               a checklist row only exists once someone has ticked or unticked
+               it, so no rows means no evidence either way, not zero done. */}}
+          {{if and $.Data.ReadOnly (not .Started)}}
+          <div class="pw-muted pw-mono">no rotation recorded</div>
+          {{else}}
           <div class="pw-progress" role="img" aria-label="{{.Done}} of {{.Total}} rotated">
             <span class="pw-progress-bar" style="width:{{.Percent}}%"></span>
           </div>
           <div class="pw-muted pw-mono">{{.Done}} / {{.Total}} rotated</div>
+          {{end}}
         </div>
       </div>
 
@@ -71,6 +85,14 @@
       <ul class="pw-checklist">
         {{range .Items}}
         <li class="pw-check{{if .Checked}} is-done{{end}}">
+          {{if $.Data.ReadOnly}}
+          {{/* A box, not a button. The tick is a fact replicated from the
+               machine, and a control here could not write it back. */}}
+          <span class="pw-check-box is-static" role="img"
+            aria-label="{{if .Checked}}rotated{{else}}not rotated{{end}}">
+            {{if .Checked}}✓{{else}}&nbsp;{{end}}
+          </span>
+          {{else}}
           <form method="post" action="/rotate/check">
             <input type="hidden" name="purl" value="{{$exposure.PURL}}">
             <input type="hidden" name="advisory" value="{{$exposure.AdvisoryID}}">
@@ -80,18 +102,27 @@
               {{if .Checked}}✓{{else}}&nbsp;{{end}}
             </button>
           </form>
+          {{end}}
           <div class="pw-check-body">
             <div class="pw-check-title">
               {{.Label}}
               {{if .RotateURL}}<a class="pw-link" href="{{.RotateURL}}" target="_blank" rel="noreferrer noopener">rotate →</a>{{end}}
             </div>
-            <div class="pw-mono pw-dim pw-wrap">{{.Path}}</div>
+            {{/* Empty on the hub: the path is a file on the other machine, and
+                 the hub is not told where it is. */}}
+            {{if .Path}}<div class="pw-mono pw-dim pw-wrap">{{.Path}}</div>{{end}}
             <div class="pw-muted">{{.Why}}</div>
             {{if .Checked}}<div class="pw-muted pw-dim">rotated {{.CheckedAt}}</div>{{end}}
           </div>
         </li>
         {{end}}
       </ul>
+      {{else if $.Data.ReadOnly}}
+      <p class="pw-muted">
+        Nothing recorded for this machine yet. The checklist is built from the credential files that
+        exist on <span class="pw-mono">{{.Device}}</span>, which only that machine can see — this is
+        a replica of its progress, not a checklist in its own right.
+      </p>
       {{else}}
       <p class="pw-muted">
         None of the credential files this checks for exist in your home directory. That is not the
@@ -99,10 +130,35 @@
         manager caches are outside what this can see.
       </p>
       {{end}}
+
+      {{if and $.Data.ReadOnly .Reach}}
+      {{/* A command rather than a link. Agent dashboards bind loopback, so an
+           anchor to this machine would be dead from anywhere but the machine
+           itself — and a link that fails silently is the whole failure mode
+           this page is supposed to avoid. */}}
+      <div class="pw-reach">
+        <div class="pw-muted">Finish it on that machine — from here:</div>
+        <div class="pw-mono pw-wrap">{{.Reach}}</div>
+        <div class="pw-muted pw-dim">
+          then open <span class="pw-mono">http://127.0.0.1:4875/rotate</span>. On the machine itself
+          that address works directly, with no tunnel.
+        </div>
+      </div>
+      {{end}}
     </div>
     {{end}}
 
     <div class="pw-notes">
+      {{if .ReadOnly}}
+      <p class="pw-muted">
+        Read-only. Each machine owns its own rotation state and sync runs one way only, so a tick
+        entered here would have no way to reach the machine it describes.
+      </p>
+      <p class="pw-muted">
+        The same package on two machines is two rotations. Progress is never merged across them —
+        rotating a key on one box does nothing for the credentials on the other.
+      </p>
+      {{else}}
       <p class="pw-muted">
         Only credentials that actually exist on this machine are listed. A generic checklist reads
         as a form to fill in; this one is meant to be finished.
@@ -111,6 +167,7 @@
         Ticks are stored per finding, so they survive a reboot and a closed browser — and two
         malicious packages are two separate checklists rather than one shared score.
       </p>
+      {{end}}
     </div>
   {{end}}
   {{end}}

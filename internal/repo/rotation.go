@@ -39,6 +39,42 @@ func (a Agent) SetRotationChecked(purl, advisoryID, itemID string, at time.Time)
 	return err
 }
 
+// RotationTick is one checklist row on its way to the hub.
+type RotationTick struct {
+	PURL       string
+	AdvisoryID string
+	ItemID     string
+	CheckedAt  time.Time
+}
+
+// SyncableRotation returns every checklist row, ticked or not.
+//
+// Unticked rows travel too. "Three of five done" and "three done, two unknown"
+// are different states, and a hub sent only the ticks cannot tell them apart —
+// it would render a half-finished rotation as a complete one.
+func (a Agent) SyncableRotation() ([]RotationTick, error) {
+	rows, err := a.DB.Query(
+		`SELECT purl, advisory_id, item_id, COALESCE(checked_at, 0) FROM rotation_items`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []RotationTick
+	for rows.Next() {
+		var t RotationTick
+		var at int64
+		if err := rows.Scan(&t.PURL, &t.AdvisoryID, &t.ItemID, &at); err != nil {
+			return nil, err
+		}
+		if at > 0 {
+			t.CheckedAt = time.Unix(at, 0)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // MalwareFindings returns open findings whose advisory is a malware record.
 //
 // These are the ones that mean code ran rather than that code could be

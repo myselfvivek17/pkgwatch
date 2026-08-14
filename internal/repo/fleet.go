@@ -159,6 +159,217 @@ func (h Hub) ReplacePackages(deviceID string, packages []FleetPackage) (int, err
 	return len(packages), tx.Commit()
 }
 
+// FleetExposure is one machine that ran a malicious package.
+type FleetExposure struct {
+	DeviceID   string
+	Hostname   string
+	PURL       string
+	AdvisoryID string
+	Summary    string
+	DetectedAt time.Time
+}
+
+// FleetMalwareFindings returns the fleet's open malware findings.
+//
+// These, not the replicated ticks, are what the hub's rotation page is built
+// from. Ticks only exist once somebody has started, so a page driven by them
+// would show nothing at all for the machine that has done nothing — which is
+// precisely the machine the page exists for.
+//
+// Requires the advisory bundle: kind lives there, not on the finding. Without
+// one this returns nil and the caller says it cannot tell.
+func (h Hub) FleetMalwareFindings(attached bool) ([]FleetExposure, error) {
+	if !attached {
+		return nil, nil
+	}
+	rows, err := h.DB.Query(`SELECT f.device_id, COALESCE(d.hostname, f.device_id),
+			f.purl, f.advisory_id, COALESCE(t.summary, ''), f.detected_at
+		FROM fleet_findings f
+		LEFT JOIN devices d ON d.id = f.device_id
+		LEFT JOIN adv.advisory_text t ON t.id = f.advisory_id
+		WHERE f.state NOT IN ('ignored', 'fixed')
+		  AND EXISTS (SELECT 1 FROM adv.advisories a
+		              WHERE a.id = f.advisory_id AND a.kind = 'malware')
+		ORDER BY f.detected_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FleetExposure
+	for rows.Next() {
+		var e FleetExposure
+		var at int64
+		if err := rows.Scan(&e.DeviceID, &e.Hostname, &e.PURL, &e.AdvisoryID,
+			&e.Summary, &at); err != nil {
+			return nil, err
+		}
+		e.DetectedAt = time.Unix(at, 0)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// FleetRotationTick is one replicated checklist row.
+type FleetRotationTick struct {
+	DeviceID   string
+	Hostname   string
+	PURL       string
+	AdvisoryID string
+	ItemID     string
+	CheckedAt  time.Time
+}
+
+// ReplaceRotation swaps in a device's checklist state.
+//
+// Replaced rather than merged because unticking is a removal, and an append-only
+// stream has no way to say "this one is not done after all" — the hub's progress
+// would only ever climb, which on this page means reporting a rotation finished
+// that nobody finished.
+func (h Hub) ReplaceRotation(deviceID string, ticks []FleetRotationTick) (int, error) {
+	tx, err := h.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM fleet_rotation WHERE device_id = ?", deviceID); err != nil {
+		return 0, err
+	}
+
+	stmt, err := tx.Prepare(`INSERT INTO fleet_rotation
+		(device_id, purl, advisory_id, item_id, checked_at) VALUES (?,?,?,?,?)`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	for _, t := range ticks {
+		var checked any
+		if !t.CheckedAt.IsZero() {
+			checked = t.CheckedAt.Unix()
+		}
+		if _, err := stmt.Exec(deviceID, t.PURL, t.AdvisoryID, t.ItemID, checked); err != nil {
+			return 0, err
+		}
+	}
+	return len(ticks), tx.Commit()
+}
+
+// FleetRotation returns every replicated checklist row, with the hostname the
+// page needs to say which machine still owes the work.
+func (h Hub) FleetRotation() ([]FleetRotationTick, error) {
+	rows, err := h.DB.Query(`SELECT r.device_id, COALESCE(d.hostname, r.device_id),
+			r.purl, r.advisory_id, r.item_id, COALESCE(r.checked_at, 0)
+		FROM fleet_rotation r LEFT JOIN devices d ON d.id = r.device_id
+		ORDER BY d.hostname, r.purl`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FleetRotationTick
+	for rows.Next() {
+		var t FleetRotationTick
+		var at int64
+		if err := rows.Scan(&t.DeviceID, &t.Hostname, &t.PURL, &t.AdvisoryID,
+			&t.ItemID, &at); err != nil {
+			return nil, err
+		}
+		if at > 0 {
+			t.CheckedAt = time.Unix(at, 0)
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// FleetQuarantineRow is one replicated quarantine record.
+//
+// PathReplicated distinguishes "taken from nowhere" from "the path did not
+// cross the wire at this sync level" — an empty string alone cannot.
+type FleetQuarantineRow struct {
+	DeviceID       string
+	Hostname       string
+	ID             string
+	PURL           string
+	AdvisoryID     string
+	State          string
+	OriginPath     string
+	PathReplicated bool
+	At             time.Time
+	RestoredAt     time.Time
+}
+
+// ReplaceQuarantine swaps in a device's quarantine set. Restoring a package
+// removes nothing here — the row stays with state 'restored' — but the agent is
+// still the only writer, so a replace is what keeps the two in step.
+func (h Hub) ReplaceQuarantine(deviceID string, items []FleetQuarantineRow) (int, error) {
+	tx, err := h.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM fleet_quarantine WHERE device_id = ?", deviceID); err != nil {
+		return 0, err
+	}
+
+	stmt, err := tx.Prepare(`INSERT INTO fleet_quarantine
+		(device_id, id, purl, advisory_id, state, origin_path, quarantined_at, restored_at)
+		VALUES (?,?,?,?,?,?,?,?)`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	for _, q := range items {
+		var restored any
+		if !q.RestoredAt.IsZero() {
+			restored = q.RestoredAt.Unix()
+		}
+		if _, err := stmt.Exec(deviceID, q.ID, q.PURL, q.AdvisoryID, q.State,
+			nullIfEmpty(q.OriginPath), q.At.Unix(), restored); err != nil {
+			return 0, err
+		}
+	}
+	return len(items), tx.Commit()
+}
+
+// FleetQuarantine lists what the fleet has put away, newest first.
+func (h Hub) FleetQuarantine(limit int) ([]FleetQuarantineRow, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := h.DB.Query(`SELECT q.device_id, COALESCE(d.hostname, q.device_id),
+			q.id, q.purl, q.advisory_id, q.state, q.origin_path,
+			q.quarantined_at, COALESCE(q.restored_at, 0)
+		FROM fleet_quarantine q LEFT JOIN devices d ON d.id = q.device_id
+		ORDER BY q.quarantined_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FleetQuarantineRow
+	for rows.Next() {
+		var q FleetQuarantineRow
+		var path sql.NullString
+		var at, restored int64
+		if err := rows.Scan(&q.DeviceID, &q.Hostname, &q.ID, &q.PURL, &q.AdvisoryID,
+			&q.State, &path, &at, &restored); err != nil {
+			return nil, err
+		}
+		q.OriginPath, q.PathReplicated = path.String, path.Valid
+		q.At = time.Unix(at, 0)
+		if restored > 0 {
+			q.RestoredAt = time.Unix(restored, 0)
+		}
+		out = append(out, q)
+	}
+	return out, rows.Err()
+}
+
 // FleetEvents returns the fleet timeline, reusing the agent timeline's filter
 // and row type so one set of templates renders both (§8).
 //

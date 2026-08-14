@@ -620,7 +620,21 @@ input, button, select, textarea { font: inherit; }
 .pw-check-box:hover { border-color: var(--accent); }
 .pw-check-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* The hub's copy of a tick. Same box so the checklist reads the same, minus
+   every affordance — no pointer, no hover, no focus ring — because there is
+   nothing on the hub that could write the state back to the machine. */
+.pw-check-box.is-static { cursor: default; border-style: dashed; }
+.pw-check-box.is-static:hover { border-color: var(--border-strong); }
+
 .pw-check-body { min-width: 0; display: grid; gap: 2px; }
+
+/* How to reach the machine that owns the checklist. A command, not a link:
+   agent dashboards bind loopback. */
+.pw-reach {
+  margin-top: 14px; padding: 10px 12px; display: grid; gap: 3px;
+  background: var(--bg-sunken); border: 1px solid var(--border); border-radius: 6px;
+  font-size: 12.5px;
+}
 .pw-check-title { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-weight: 600; }
 
 /* ---- quarantine ----------------------------------------------------------- */

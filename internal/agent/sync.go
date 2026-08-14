@@ -160,6 +160,44 @@ func syncOnce(cfg config.Config) syncOutcome {
 		})
 	}
 
+	// What this machine has done about its malware, sent at findings level:
+	// both describe findings the hub already holds rather than adding to the
+	// picture of what is installed here.
+	ticks, err := store.SyncableRotation()
+	if err != nil {
+		slog.Warn("could not read rotation progress for sync", "error", err)
+	} else {
+		push.RotationComplete = true
+		for _, t := range ticks {
+			push.Rotation = append(push.Rotation, fleet.RotationTick{
+				PURL: t.PURL, AdvisoryID: t.AdvisoryID, ItemID: t.ItemID, CheckedAt: t.CheckedAt,
+			})
+		}
+	}
+
+	quarantined, complete, err := store.SyncableQuarantine()
+	if err != nil {
+		slog.Warn("could not read quarantine for sync", "error", err)
+	} else {
+		push.QuarantineComplete = complete
+		if !complete {
+			slog.Warn("quarantine snapshot truncated; the hub will keep the set it already has")
+		}
+		for _, q := range quarantined {
+			row := fleet.Quarantined{
+				ID: q.ID, PURL: q.PURL, AdvisoryID: q.AdvisoryID,
+				State: q.State, At: q.At, RestoredAt: q.RestoredAt,
+			}
+			// The path is inventory-shaped, so it travels on the same terms as
+			// the inventory does. Withheld, not blanked: the hub's page says the
+			// path was not replicated rather than showing an empty column.
+			if level == "full" {
+				row.OriginPath = q.OriginPath
+			}
+			push.Quarantine = append(push.Quarantine, row)
+		}
+	}
+
 	if level == "full" {
 		packages, err := store.SyncablePackages()
 		if err != nil {
@@ -197,7 +235,8 @@ func syncOnce(cfg config.Config) syncOutcome {
 
 	slog.Info("synced to hub",
 		"events_sent", len(push.Events), "events_stored", resp.Events,
-		"cursor_advanced", marked, "findings", resp.Findings, "packages", resp.Packages)
+		"cursor_advanced", marked, "findings", resp.Findings, "packages", resp.Packages,
+		"rotation", resp.Rotation, "quarantine", resp.Quarantine)
 	return syncOK
 }
 

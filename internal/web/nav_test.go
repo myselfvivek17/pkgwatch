@@ -66,6 +66,31 @@ func hubServer(t *testing.T) http.Handler {
 	srv.SearchPackages = func(string) ([]repo.FleetSearchHit, error) { return nil, nil }
 	srv.InventoryCoverage = func() ([]string, []string, error) { return nil, nil, nil }
 
+	// The response pages, over replicated state. Populated rather than empty so
+	// the tests that read them exercise a rendered row: an empty fleet renders
+	// the same on the hub whether the page works or not.
+	srv.FleetExposures = func() ([]repo.FleetExposure, bool, error) {
+		return []repo.FleetExposure{{
+			DeviceID: "dev-1", Hostname: "laptop",
+			PURL: "pkg:npm/%40ctrl/tinycolor@4.1.2", AdvisoryID: "MAL-2025-47141",
+			Summary: "Malicious code in @ctrl/tinycolor (npm)", DetectedAt: time.Now(),
+		}}, true, nil
+	}
+	srv.FleetRotation = func() ([]repo.FleetRotationTick, error) {
+		return []repo.FleetRotationTick{
+			{DeviceID: "dev-1", Hostname: "laptop", PURL: "pkg:npm/%40ctrl/tinycolor@4.1.2",
+				AdvisoryID: "MAL-2025-47141", ItemID: "ssh", CheckedAt: time.Now()},
+			{DeviceID: "dev-1", Hostname: "laptop", PURL: "pkg:npm/%40ctrl/tinycolor@4.1.2",
+				AdvisoryID: "MAL-2025-47141", ItemID: "aws"},
+		}, nil
+	}
+	srv.FleetQuarantine = func(int) ([]repo.FleetQuarantineRow, error) {
+		return []repo.FleetQuarantineRow{{
+			DeviceID: "dev-1", Hostname: "laptop", ID: "abc123",
+			PURL: "pkg:npm/zwitch@2.0.4", State: repo.QuarantineActive, At: time.Now(),
+		}}, nil
+	}
+
 	r := chi.NewRouter()
 	srv.Routes(r)
 	return r
