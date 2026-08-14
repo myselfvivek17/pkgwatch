@@ -126,19 +126,21 @@ func (s *Server) handleFleetInventory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "inventory unavailable: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	counts, err := s.FleetEcosystems()
+	// The same hook the agent's page uses, so "examined" has one definition.
+	// Coverage is matched per release — Ubuntu:22.04:LTS is not covered by a
+	// bundle carrying Ubuntu:24.04:LTS — and an ecosystem the bundle does not
+	// name has no records at all, which must read as unknown rather than clean.
+	counts, covered, err := s.Ecosystems()
 	if err != nil {
 		http.Error(w, "inventory unavailable: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	_, uncovered, err := s.InventoryCoverage()
-	if err != nil {
-		http.Error(w, "coverage unavailable: "+err.Error(), http.StatusInternalServerError)
-		return
+	coveredSet := map[string]bool{}
+	for _, name := range covered {
+		coveredSet[name] = true
 	}
 
 	data := FleetInventoryData{
-		Uncovered: uncovered,
 		Truncated: len(rows) == limit,
 		ScopeFilter: options(scope,
 			"", "any scope",
@@ -146,10 +148,6 @@ func (s *Server) handleFleetInventory(w http.ResponseWriter, r *http.Request) {
 			"system", "system", "container", "container"),
 	}
 
-	uncoveredSet := map[string]bool{}
-	for _, name := range uncovered {
-		uncoveredSet[name] = true
-	}
 	names := make([]string, 0, len(counts))
 	for name := range counts {
 		names = append(names, name)
@@ -159,8 +157,11 @@ func (s *Server) handleFleetInventory(w http.ResponseWriter, r *http.Request) {
 	ecosystemOptions := []string{"", "all ecosystems"}
 	for _, name := range names {
 		data.Ecosystems = append(data.Ecosystems, EcosystemCount{
-			Ecosystem: name, Count: counts[name], Covered: !uncoveredSet[name],
+			Ecosystem: name, Count: counts[name], Covered: coveredSet[name],
 		})
+		if !coveredSet[name] {
+			data.Uncovered = append(data.Uncovered, name)
+		}
 		ecosystemOptions = append(ecosystemOptions, name, name)
 	}
 	data.EcosystemFilter = options(ecosystem, ecosystemOptions...)

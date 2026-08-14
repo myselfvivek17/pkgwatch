@@ -73,14 +73,24 @@ func TestFleetInventoryNamesMachinesThatSendNoPackages(t *testing.T) {
 				{DeviceID: "dev-2", Hostname: "server", SyncLevel: repo.SyncLevelFindings},
 			}, nil
 		}
-		s.FleetEcosystems = func() (map[string]int, error) {
-			return map[string]int{"npm": 1, "alpine": 67}, nil
-		}
-		s.InventoryCoverage = func() ([]string, []string, error) {
-			return []string{"npm"}, []string{"alpine"}, nil
+		// Counts from the fleet, covered list from the bundle. Coverage is
+		// matched per release, so the 22.04 machine below is NOT examined by a
+		// bundle carrying 24.04 — the first version of this page derived
+		// coverage from InventoryCoverage, which returns hostnames, so nothing
+		// ever matched and every ecosystem rendered as examined.
+		s.Ecosystems = func() (map[string]int, []string, error) {
+			return map[string]int{"npm": 1, "Ubuntu:22.04:LTS": 191, "Ubuntu:24.04:LTS": 1953},
+				[]string{"npm", "Ubuntu:24.04:LTS"}, nil
 		}
 	})
 	body := get(t, h, "/inventory").Body.String()
+
+	// The assertion that would have caught it: one covered release examined,
+	// one uncovered release not, on the same page.
+	if strings.Count(body, "NOT EXAMINED") != 1 {
+		t.Errorf("found %d unexamined ecosystems, want exactly the one with no bundle scope",
+			strings.Count(body, "NOT EXAMINED"))
+	}
 
 	if !strings.Contains(body, "lodash") {
 		t.Error("a reported package is missing")

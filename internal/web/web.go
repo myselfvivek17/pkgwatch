@@ -65,8 +65,7 @@ func (s *Server) nav(active string) []NavItem {
 			Enabled: (s.Exposures != nil && s.Credentials != nil) ||
 				(s.FleetExposures != nil && s.FleetRotation != nil)},
 		{Key: "inventory", Label: "Inventory", Href: "/inventory",
-			Enabled: (s.Inventory != nil && s.Ecosystems != nil) ||
-				(s.FleetInventory != nil && s.FleetEcosystems != nil)},
+			Enabled: s.Ecosystems != nil && (s.Inventory != nil || s.FleetInventory != nil)},
 		{Key: "pairing", Label: "Device pairing", Href: "/devices", Enabled: s.Devices != nil},
 		{Key: "search", Label: "Package search", Href: "/search",
 			Enabled: s.SearchPackages != nil && s.InventoryCoverage != nil},
@@ -184,9 +183,12 @@ type Server struct {
 	// the install block and inventory pages. Both are narrower than the agent's:
 	// sessions and their decisions never leave the machine, and a replicated
 	// package row carries no install path and no retirement history.
-	FleetBlocks     func(limit int) ([]repo.FleetBlock, error)
-	FleetInventory  func(ecosystem, scope string, limit int) ([]repo.FleetInventoryRow, error)
-	FleetEcosystems func() (map[string]int, error)
+	// Ecosystem coverage is deliberately NOT one of these: the hub reuses the
+	// agent's Ecosystems hook, so "examined" has one definition. Deriving it
+	// separately here is how Ubuntu:22.04:LTS came to render as examined when
+	// no bundle covered it — the false all-clear this project exists to avoid.
+	FleetBlocks    func(limit int) ([]repo.FleetBlock, error)
+	FleetInventory func(ecosystem, scope string, limit int) ([]repo.FleetInventoryRow, error)
 
 	// Settings backs the settings page. Supplied by the daemon because only it
 	// knows which file it was started with — a page that read the default path
@@ -356,7 +358,7 @@ func (s *Server) Routes(r chi.Router) {
 		switch {
 		case s.Inventory != nil && s.Ecosystems != nil:
 			r.Get("/inventory", s.handleInventory)
-		case s.FleetInventory != nil && s.FleetEcosystems != nil:
+		case s.FleetInventory != nil && s.Ecosystems != nil:
 			r.Get("/inventory", s.handleFleetInventory)
 		}
 		switch {

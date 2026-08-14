@@ -215,7 +215,16 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// audit here, and the pages say so rather than rendering empty ones.
 	srv.FleetBlocks = st.Repo.FleetBlocks
 	srv.FleetInventory = st.Repo.FleetInventory
-	srv.FleetEcosystems = st.Repo.FleetEcosystemCounts
+
+	// Counts from the fleet, coverage from the bundle — the same second value
+	// the agent supplies, so "examined" means the same thing on both pages.
+	// Coverage is matched per release: a bundle carrying Ubuntu:24.04:LTS does
+	// not examine an Ubuntu:22.04:LTS machine, and reporting it as examined
+	// would render its packages clean when nothing ever looked at them.
+	srv.Ecosystems = func() (map[string]int, []string, error) {
+		counts, err := st.Repo.FleetEcosystemCounts()
+		return counts, st.Bundle.Ecosystems, err
+	}
 
 	router := chi.NewRouter()
 	router.Get("/health", daemon.HealthHandler("hub", started, func() (bool, string) {
