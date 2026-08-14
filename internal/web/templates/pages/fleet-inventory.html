@@ -73,17 +73,19 @@
           {{end}}
         </tbody>
       </table>
+      {{/* Per machine, because the cap is per machine. A page-level notice
+           cannot say which of these lists stops short. */}}
+      {{if .Truncated}}
+      <p class="pw-muted">
+        Showing {{len .Rows}} of {{.Total}} on this machine. Filter by ecosystem or scope to reach
+        the rest — this list is cut short, not complete.
+      </p>
+      {{end}}
     {{end}}
   </div>
   {{end}}
 
   <div class="pw-notes">
-    {{if .Truncated}}
-    <p class="pw-muted">
-      The list stops at the row cap, so this is not the whole fleet. Filter by ecosystem or scope to
-      see the rest rather than reading this page as complete.
-    </p>
-    {{end}}
     <p class="pw-muted">
       {{.Total}} package(s) shown. Install paths and the retirement audit are agent-only — a
       replicated row carries neither, so this page cannot tell you where a package sits on disk or

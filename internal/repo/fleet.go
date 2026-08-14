@@ -117,7 +117,12 @@ func (h Hub) ReplaceFindings(deviceID string, findings []FleetFinding, now time.
 			return 0, err
 		}
 	}
-	return len(findings), tx.Commit()
+	// Count only on a commit that happened. `return len(x), tx.Commit()` reports
+	// rows stored alongside the error saying they were not.
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(findings), nil
 }
 
 // FleetPackage is one inventory row, received only at sync_level = full.
@@ -156,7 +161,10 @@ func (h Hub) ReplacePackages(deviceID string, packages []FleetPackage) (int, err
 			return 0, err
 		}
 	}
-	return len(packages), tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(packages), nil
 }
 
 // FleetExposure is one machine that ran a malicious package.
@@ -253,7 +261,10 @@ func (h Hub) ReplaceRotation(deviceID string, ticks []FleetRotationTick) (int, e
 			return 0, err
 		}
 	}
-	return len(ticks), tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(ticks), nil
 }
 
 // FleetRotation returns every replicated checklist row, with the hostname the
@@ -333,7 +344,10 @@ func (h Hub) ReplaceQuarantine(deviceID string, items []FleetQuarantineRow) (int
 			return 0, err
 		}
 	}
-	return len(items), tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(items), nil
 }
 
 // FleetQuarantine lists what the fleet has put away, newest first.
@@ -471,6 +485,10 @@ type FleetInventoryRow struct {
 	Name      string
 	Version   string
 	Scope     string
+
+	// Total is how many packages this machine has matching the filter, which is
+	// not how many rows came back — the query caps per machine.
+	Total int
 }
 
 // Reported says whether this row is a package rather than a placeholder for a
@@ -479,24 +497,43 @@ func (r FleetInventoryRow) Reported() bool { return r.Name != "" }
 
 // FleetInventory lists the fleet's packages, and every approved machine
 // whether or not it sends any.
-func (h Hub) FleetInventory(ecosystem, scope string, limit int) ([]FleetInventoryRow, error) {
-	if limit <= 0 {
-		limit = 500
+//
+// perMachine caps the rows returned FOR EACH MACHINE, not the result as a
+// whole. A single LIMIT over the joined rows looks equivalent and is not: the
+// rows come back ordered by hostname, so the first machine's packages fill the
+// budget and every machine after it disappears from the page entirely. On this
+// fleet that was literal — a laptop with 2,183 packages sorted ahead of the
+// server, so a 1,000-row cap rendered a two-machine fleet as one. A missing
+// machine reads as a machine with nothing wrong, which is the failure this
+// page's LEFT JOIN exists to prevent, arriving through the LIMIT instead.
+//
+// Total comes back with each row so the page can say how much of a machine it
+// is showing rather than quietly ending mid-inventory.
+func (h Hub) FleetInventory(ecosystem, scope string, perMachine int) ([]FleetInventoryRow, error) {
+	if perMachine <= 0 {
+		perMachine = 500
 	}
 
 	// The filters apply to the package side of the join only. Moving them into
 	// the WHERE clause would drop the placeholder rows and take every
 	// non-reporting machine off the page the moment anyone filtered.
-	rows, err := h.DB.Query(`SELECT d.id, d.hostname, d.sync_level,
-			COALESCE(p.ecosystem, ''), COALESCE(p.name, ''),
-			COALESCE(p.version, ''), COALESCE(p.scope, '')
-		FROM devices d
-		LEFT JOIN fleet_packages p ON p.device_id = d.id
-			AND (? = '' OR p.ecosystem = ?)
-			AND (? = '' OR p.scope = ?)
-		WHERE d.status = ?
-		ORDER BY d.hostname, p.ecosystem, p.name, p.version
-		LIMIT ?`, ecosystem, ecosystem, scope, scope, DeviceStatusApproved, limit)
+	rows, err := h.DB.Query(`WITH ranked AS (
+			SELECT d.id AS device_id, d.hostname AS hostname, d.sync_level AS sync_level,
+				p.ecosystem AS ecosystem, p.name AS name, p.version AS version, p.scope AS scope,
+				ROW_NUMBER() OVER (PARTITION BY d.id ORDER BY p.ecosystem, p.name, p.version) AS rn,
+				COUNT(p.name) OVER (PARTITION BY d.id) AS total
+			FROM devices d
+			LEFT JOIN fleet_packages p ON p.device_id = d.id
+				AND (? = '' OR p.ecosystem = ?)
+				AND (? = '' OR p.scope = ?)
+			WHERE d.status = ?
+		)
+		SELECT device_id, hostname, sync_level,
+			COALESCE(ecosystem, ''), COALESCE(name, ''),
+			COALESCE(version, ''), COALESCE(scope, ''), total
+		FROM ranked WHERE rn <= ?
+		ORDER BY hostname, ecosystem, name, version`,
+		ecosystem, ecosystem, scope, scope, DeviceStatusApproved, perMachine)
 	if err != nil {
 		return nil, err
 	}
@@ -506,7 +543,7 @@ func (h Hub) FleetInventory(ecosystem, scope string, limit int) ([]FleetInventor
 	for rows.Next() {
 		var r FleetInventoryRow
 		if err := rows.Scan(&r.DeviceID, &r.Hostname, &r.SyncLevel,
-			&r.Ecosystem, &r.Name, &r.Version, &r.Scope); err != nil {
+			&r.Ecosystem, &r.Name, &r.Version, &r.Scope, &r.Total); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -586,7 +623,10 @@ func (h Hub) ReplaceCredentials(deviceID string, items []FleetCredential, ranks 
 			return 0, err
 		}
 	}
-	return len(items), tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(items), nil
 }
 
 // FleetCredentials lists what each approved machine holds.

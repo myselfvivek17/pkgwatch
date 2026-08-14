@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"os"
 
@@ -22,6 +23,11 @@ type SettingsData struct {
 	Path   string
 	Exists bool
 
+	// Unreadable is set when the file could not be examined at all — neither
+	// present nor absent, so nothing below can be called a default with a
+	// straight face.
+	Unreadable string
+
 	DataDir string
 }
 
@@ -40,14 +46,25 @@ func SettingsFrom(cfg config.Config, mode string) SettingsData {
 	if path == "" {
 		path = config.DefaultPath()
 	}
-	_, err := os.Stat(path)
 
-	return SettingsData{
+	data := SettingsData{
 		Sections: config.Explain(cfg, path, mode),
 		Path:     path,
-		Exists:   err == nil,
 		DataDir:  cfg.DataDir,
 	}
+
+	// Only "it is not there" means the machine is running on defaults. A
+	// permission error or an unreadable mount is a third state, and reporting
+	// it as a missing file would tell someone every value below is a default
+	// when the file may say otherwise.
+	switch _, err := os.Stat(path); {
+	case err == nil:
+		data.Exists = true
+	case errors.Is(err, os.ErrNotExist):
+	default:
+		data.Unreadable = err.Error()
+	}
+	return data
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {

@@ -30,6 +30,16 @@ func scriptGuardCmd() *cobra.Command {
 			"be a guard. --off removes the setting again.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmd.OutOrStdout()
+
+			// Turning the guard off touches npm's config and nothing else, so
+			// it must not depend on the database opening. This is the escape
+			// hatch: needing a healthy agent.db to undo a change to your npm
+			// config is the wrong thing to discover while trying to undo it.
+			if off {
+				return disableGuard(out)
+			}
+
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return err
@@ -40,10 +50,6 @@ func scriptGuardCmd() *cobra.Command {
 			}
 			defer st.Close()
 
-			out := cmd.OutOrStdout()
-			if off {
-				return disableGuard(out)
-			}
 			return enableGuard(out, st.Repo)
 		},
 	}
@@ -215,6 +221,17 @@ func allowScriptsCmd() *cobra.Command {
 			}
 			fmt.Fprintf(out, "%s may run install scripts\n", name)
 
+			// Recorded either way — allowing ahead of turning the guard on is a
+			// legitimate order to do this in — but an allowance while every
+			// package can already run scripts grants nothing, and letting that
+			// read as protection is the failure mode this project keeps
+			// chasing. Said once, not enforced.
+			if state, err := scriptguard.Status(); err == nil && !state.Enabled {
+				fmt.Fprintf(out, "\nNote: the script guard is OFF, so every package already runs its\n"+
+					"install scripts and this allowance grants nothing on its own. Turn it on with\n"+
+					"`pkgwatch enable-script-guard`; the allowance is on file and will apply then.\n")
+			}
+
 			// npm rebuild exits 0 whether or not it matched anything, so a
 			// typo reads exactly like a successful build. The allowance still
 			// stands — allowing ahead of an install is legitimate — but the
@@ -244,7 +261,7 @@ func allowScriptsCmd() *cobra.Command {
 					return err
 				}
 			}
-			output, err := scriptguard.Run(dir, name)
+			output, err := scriptguard.Run(cmd.Context(), dir, name)
 			if err != nil {
 				// The allowance stands either way. It is a recorded decision, and
 				// a rebuild that failed for its own reasons — wrong directory, not

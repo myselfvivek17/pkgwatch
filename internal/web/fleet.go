@@ -155,9 +155,11 @@ func (f FleetData) LastCheck() string {
 	case d < time.Hour:
 		return fmt.Sprintf("%d min ago", int(d.Minutes()))
 	case d < 48*time.Hour:
-		return fmt.Sprintf("%d hours ago", int(d.Hours()))
+		n := int(d.Hours())
+		return fmt.Sprintf("%d hour%s ago", n, plural(n))
 	default:
-		return fmt.Sprintf("%d days ago", int(d.Hours()/24))
+		n := int(d.Hours() / 24)
+		return fmt.Sprintf("%d day%s ago", n, plural(n))
 	}
 }
 

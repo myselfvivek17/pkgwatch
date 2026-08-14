@@ -40,8 +40,13 @@ func (a Agent) AllowScripts(pkg, via, note string, at time.Time) error {
 }
 
 // RevokeScripts withdraws an allowance without forgetting it was made.
+//
+// Only the first revocation sets the date, mirroring the way re-allowing leaves
+// approved_at alone. Running it twice otherwise moves the timestamp forward and
+// the record stops answering when the decision was actually taken.
 func (a Agent) RevokeScripts(pkg string, at time.Time) error {
-	_, err := a.DB.Exec("UPDATE script_allowlist SET revoked_at = ? WHERE package = ?",
+	_, err := a.DB.Exec(
+		"UPDATE script_allowlist SET revoked_at = ? WHERE package = ? AND revoked_at IS NULL",
 		at.Unix(), pkg)
 	return err
 }

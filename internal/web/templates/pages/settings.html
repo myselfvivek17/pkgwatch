@@ -5,7 +5,11 @@
   {{with .Data}}
   <div class="pw-card">
     <p class="pw-muted">
-      {{if .Exists}}
+      {{if .Unreadable}}
+        <span class="pw-mono">{{.Path}}</span> could not be read: {{.Unreadable}}. The values below
+        are what this process loaded at startup, and the source column cannot be trusted — a file
+        that cannot be examined is not the same as one that is not there.
+      {{else if .Exists}}
         Read from <span class="pw-mono">{{.Path}}</span>. Anything not in that file runs on the
         built-in default, which is what the source column distinguishes — an effective value on its
         own cannot say whether somebody chose it or nobody ever touched it.

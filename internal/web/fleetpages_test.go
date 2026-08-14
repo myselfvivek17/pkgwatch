@@ -110,6 +110,54 @@ func TestFleetInventoryNamesMachinesThatSendNoPackages(t *testing.T) {
 	}
 }
 
+// The row cap must never cost a machine its place on the page.
+//
+// The first version put a single LIMIT over the joined rows, ordered by
+// hostname — so the first machine's packages filled the budget and every
+// machine after it vanished. On the real fleet that was literal: a laptop with
+// 2,183 packages sorted ahead of the server, and a 1,000-row cap rendered a
+// two-machine fleet as one. A missing machine reads as a machine with nothing
+// wrong, which is the failure the LEFT JOIN was written to prevent.
+func TestTheRowCapNeverDropsAWholeMachine(t *testing.T) {
+	_, h := hubServerWith(t, func(s *Server) {
+		s.FleetInventory = func(_, _ string, perMachine int) ([]repo.FleetInventoryRow, error) {
+			var rows []repo.FleetInventoryRow
+			// A loud machine that would eat any page-wide budget, and a quiet
+			// one after it alphabetically.
+			for i := 0; i < perMachine; i++ {
+				rows = append(rows, repo.FleetInventoryRow{
+					DeviceID: "dev-1", Hostname: "aaa-loud", SyncLevel: repo.SyncLevelFull,
+					Ecosystem: "npm", Name: "pkg", Version: "1", Scope: "project",
+					Total: perMachine * 3,
+				})
+			}
+			rows = append(rows, repo.FleetInventoryRow{
+				DeviceID: "dev-2", Hostname: "zzz-quiet", SyncLevel: repo.SyncLevelFull,
+				Ecosystem: "npm", Name: "lodash", Version: "4.17.21", Scope: "project",
+				Total: 1,
+			})
+			return rows, nil
+		}
+		s.Ecosystems = func() (map[string]int, []string, error) {
+			return map[string]int{"npm": 2}, []string{"npm"}, nil
+		}
+	})
+
+	body := get(t, h, "/inventory").Body.String()
+
+	if !strings.Contains(body, "zzz-quiet") {
+		t.Error("the machine after the loud one is missing — absent reads as clean")
+	}
+	if !strings.Contains(body, "lodash") {
+		t.Error("the quiet machine's packages were dropped")
+	}
+	// And the machine that was cut short says so, per machine: a page-level
+	// notice cannot name which list is incomplete.
+	if !strings.Contains(body, "on this machine") {
+		t.Error("a truncated machine list does not say it is truncated")
+	}
+}
+
 // The hub has no session report and no inventory writes. Both routes must be
 // absent rather than answering with something empty.
 func TestTheHubHasNoSessionReport(t *testing.T) {

@@ -102,8 +102,9 @@ type FleetInventoryData struct {
 	EcosystemFilter []Option
 	ScopeFilter     []Option
 
-	Total     int
-	Truncated bool
+	// Total is every row shown across the fleet. Whether a list was cut short
+	// is a per-machine fact and lives on MachineInventory.
+	Total int
 }
 
 // MachineInventory is one machine's packages, or its reason for having none.
@@ -114,14 +115,25 @@ type MachineInventory struct {
 	// Withheld means this hub takes findings only from this machine, so an
 	// empty list is a setting rather than an empty machine.
 	Withheld bool
+
+	// Total is what this machine actually has; len(Rows) is what fitted. The
+	// two differ per machine, so the notice has to be per machine — a single
+	// page-level "truncated" line cannot say which list is short.
+	Total int
 }
+
+// Truncated reports whether this machine's list stops short of its inventory.
+func (m MachineInventory) Truncated() bool { return m.Total > len(m.Rows) }
 
 func (s *Server) handleFleetInventory(w http.ResponseWriter, r *http.Request) {
 	ecosystem := r.URL.Query().Get("ecosystem")
 	scope := r.URL.Query().Get("scope")
-	const limit = 1000
 
-	rows, err := s.FleetInventory(ecosystem, scope, limit)
+	// Per machine, not per page: a page-wide cap silently drops whole machines
+	// off the end of the fleet.
+	const perMachine = 400
+
+	rows, err := s.FleetInventory(ecosystem, scope, perMachine)
 	if err != nil {
 		http.Error(w, "inventory unavailable: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -141,7 +153,6 @@ func (s *Server) handleFleetInventory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := FleetInventoryData{
-		Truncated: len(rows) == limit,
 		ScopeFilter: options(scope,
 			"", "any scope",
 			"global", "global", "project", "project", "venv", "venv",
@@ -173,6 +184,7 @@ func (s *Server) handleFleetInventory(w http.ResponseWriter, r *http.Request) {
 			data.Machines = append(data.Machines, MachineInventory{
 				Hostname: row.Hostname,
 				Withheld: row.SyncLevel != repo.SyncLevelFull,
+				Total:    row.Total,
 			})
 			i = len(data.Machines) - 1
 			at[row.DeviceID] = i
