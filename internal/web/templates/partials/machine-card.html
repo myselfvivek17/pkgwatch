@@ -50,7 +50,7 @@
     {{if .NeverReported}}
       <div class="pw-machine-silence">NEVER REPORTED</div>
     {{else if .Device.Approved}}
-      <div class="pw-machine-silence">NOT REPORTING · {{.Silence}}</div>
+      <div class="pw-machine-silence">NOT REPORTING — {{.Silence}}</div>
     {{end}}
     <div class="pw-machine-note">{{.Note}}</div>
   {{end}}
