@@ -118,6 +118,17 @@ type FleetData struct {
 	// Critical counts machines with at least one critical finding, among those
 	// actually reporting. It drives the banner.
 	Critical int
+
+	// Trends is nil when the hub cannot supply it, and the block is left out
+	// rather than drawn empty — a chart of fourteen zero-height columns says
+	// "nothing happened", which is not the same as "nothing was counted".
+	Trends *Trends
+
+	// Recent is the last few timeline rows, as a preview with a way through to
+	// the whole thing. Built through buildRow so an event reads the same here
+	// as it does on the timeline — the first version printed the raw kind twice
+	// and called it a summary.
+	Recent []TimelineRow
 }
 
 // LastCheck is how recently the freshest machine reported.
@@ -281,7 +292,42 @@ func (s *Server) handleFleet(w http.ResponseWriter, r *http.Request) {
 		return machineRank(data.Machines[i]) < machineRank(data.Machines[j])
 	})
 
+	if data.Trends, err = s.trends(now); err != nil {
+		http.Error(w, "trends unavailable: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if s.Events != nil {
+		events, err := s.Events(repo.EventFilter{Limit: 6})
+		if err != nil {
+			http.Error(w, "recent activity unavailable: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		for _, e := range events {
+			data.Recent = append(data.Recent, buildRow(e))
+		}
+	}
+
 	s.render(w, "fleet", "Fleet overview", "overview", data)
+}
+
+// trends assembles the chart block, or nothing when the hooks it needs are
+// absent — the page renders without it rather than failing.
+func (s *Server) trends(now time.Time) (*Trends, error) {
+	if s.EventCounts == nil || s.Ecosystems == nil {
+		return nil, nil
+	}
+
+	counts, err := s.EventCounts(now.AddDate(0, 0, -TrendDays))
+	if err != nil {
+		return nil, err
+	}
+	ecosystems, covered, err := s.Ecosystems()
+	if err != nil {
+		return nil, err
+	}
+
+	built := buildTrends(counts, ecosystems, covered, now)
+	return &built, nil
 }
 
 func machineRank(m Machine) int {

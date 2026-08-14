@@ -190,6 +190,9 @@ type Server struct {
 	FleetBlocks    func(limit int) ([]repo.FleetBlock, error)
 	FleetInventory func(ecosystem, scope string, limit int) ([]repo.FleetInventoryRow, error)
 
+	// EventCounts backs the fleet page's trend charts.
+	EventCounts func(since time.Time) ([]repo.EventDay, error)
+
 	// Settings backs the settings page. Supplied by the daemon because only it
 	// knows which file it was started with — a page that read the default path
 	// would confidently describe a config this process never loaded.

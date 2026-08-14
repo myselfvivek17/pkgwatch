@@ -52,6 +52,112 @@
     {{end}}
   </div>
 
+  {{with .Trends}}
+  <div class="pw-section-head">
+    <h2 class="pw-section-title">Trends</h2>
+    <span class="pw-muted pw-dim">last 14 days</span>
+  </div>
+
+  <div class="pw-charts">
+    <div class="pw-card pw-chart-wide">
+      <div class="pw-chart-head">
+        <div>
+          <div class="pw-chart-title">Findings opened per day</div>
+          <div class="pw-muted pw-dim">{{.Total}} in the window</div>
+        </div>
+        <div class="pw-legend">
+          {{range .Legend}}{{template "severity-badge" .}}{{end}}
+        </div>
+      </div>
+
+      {{/* Every day in the window gets a column, including the ones nothing
+           happened on. Drawing only the days with rows would compress a quiet
+           fortnight into three fat bars and make it read as a busy one. */}}
+      <div class="pw-bars">
+        {{range .Findings}}
+        <div class="pw-bar-col" title="{{.Label}} · {{.Total}} finding(s)">
+          <div class="pw-bar-stack">
+            {{range .Segments}}
+            <span class="pw-bar-seg pw-bar-{{.Tier}}" style="height:{{.Percent}}%"></span>
+            {{end}}
+          </div>
+          <div class="pw-bar-tick">{{.Tick}}</div>
+        </div>
+        {{end}}
+      </div>
+    </div>
+
+    <div class="pw-chart-stack">
+      <div class="pw-card">
+        {{/* Installs *blocked*, not installs evaluated. Sessions and their
+             per-package verdicts never leave the machine, so the hub cannot
+             count what it never received — and a big "0 this week" beside a
+             flat sparkline would read as a quiet week rather than as a number
+             nobody has. */}}
+        <div class="pw-chart-title">Installs blocked</div>
+        <div class="pw-bigstat">
+          <span class="pw-bigstat-value">{{.BlockTotal}}</span>
+          <span class="pw-muted">in 14 days</span>
+        </div>
+        {{if .BlockLine}}
+        <svg class="pw-spark" viewBox="0 0 240 56" preserveAspectRatio="none" role="img"
+          aria-label="{{.BlockTotal}} installs blocked over the last 14 days">
+          <path d="{{.BlockArea}}" fill="var(--sev-critical-bg)" opacity="0.18"></path>
+          <path d="{{.BlockLine}}" fill="none" stroke="var(--sev-critical-fg)" stroke-width="1.6"
+            stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
+        </svg>
+        <div class="pw-spark-axis">
+          <span>{{.FirstDay}}</span>
+          <span>{{.LastDay}}</span>
+        </div>
+        {{end}}
+        <p class="pw-muted pw-dim">
+          How many installs were <em>evaluated</em> stays on each machine — sessions are never
+          synced, so this hub counts only the refusals it was told about.
+        </p>
+      </div>
+
+      <div class="pw-card">
+        <div class="pw-chart-title">Packages watched</div>
+        <div class="pw-ecobars">
+          {{range .Ecosystems}}
+          <div class="pw-ecobar">
+            <span class="pw-ecobar-name">{{.Name}}</span>
+            <span class="pw-ecobar-track">
+              <span class="pw-ecobar-fill{{if not .Covered}} is-uncovered{{end}}"
+                style="width:{{.Percent}}%"></span>
+            </span>
+            <span class="pw-ecobar-count pw-mono">{{.Count}}</span>
+          </div>
+          {{end}}
+        </div>
+        {{/* A full bar for an ecosystem nothing has advisories for would be the
+             same false all-clear the inventory page had to fix. */}}
+        <p class="pw-muted pw-dim">
+          A hatched bar is an ecosystem held with no advisories to match it against — counted, and
+          absent from every finding.
+        </p>
+      </div>
+    </div>
+  </div>
+  {{end}}
+
+  {{if .Recent}}
+  <div class="pw-section-head">
+    <h2 class="pw-section-title">Recent activity</h2>
+    <a class="pw-link" href="/timeline">view full timeline →</a>
+  </div>
+  <div class="pw-card pw-activity">
+    {{range .Recent}}
+    <div class="pw-activity-row{{if .Routine}} is-routine{{end}}">
+      <span class="pw-activity-time pw-mono pw-dim">{{.Time}}</span>
+      <span class="pw-activity-kind pw-dim">{{.KindLabel}}</span>
+      <span class="pw-activity-summary">{{.Summary}}</span>
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
   {{/* Shown only when a machine is actually silent. Standing prose explaining
        what an offline card means is noise on a fleet where every machine is
        reporting, and the sentence stops being read long before the day it

@@ -221,6 +221,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// Coverage is matched per release: a bundle carrying Ubuntu:24.04:LTS does
 	// not examine an Ubuntu:22.04:LTS machine, and reporting it as examined
 	// would render its packages clean when nothing ever looked at them.
+	srv.EventCounts = st.Repo.FleetEventCounts
 	srv.Ecosystems = func() (map[string]int, []string, error) {
 		counts, err := st.Repo.FleetEcosystemCounts()
 		return counts, st.Bundle.Ecosystems, err

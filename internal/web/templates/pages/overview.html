@@ -3,13 +3,16 @@
   <h1 class="pw-page-title">{{if eq .Mode "hub"}}Fleet overview{{else}}Overview{{end}}</h1>
 
   {{with .Data}}
+  {{/* Deliberately not a feature list. The previous one named hub pairing,
+       quarantine and credential rotation as unbuilt for months after they
+       shipped — a paragraph describing the tool's own state goes stale in a way
+       the nav, which is derived from what is actually wired, cannot. */}}
   <div class="pw-card">
     <div class="pw-section-title">This build</div>
     <p class="pw-muted">
       Installs are gated, the inventory is scanned on a schedule and matched against the advisory
-      bundle after every scan and sync. Not built yet: hub pairing and fleet sync, quarantine, and
-      the credential rotation checklist — their nav items are shown disabled rather than hidden, so
-      what is missing stays visible.
+      bundle after every scan and sync. Anything not built yet is a disabled item in the sidebar
+      rather than a missing one, so what this build cannot do stays visible.
     </p>
   </div>
 
