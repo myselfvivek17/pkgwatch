@@ -370,6 +370,136 @@ func (h Hub) FleetQuarantine(limit int) ([]FleetQuarantineRow, error) {
 	return out, rows.Err()
 }
 
+// FleetBlock is one install this fleet refused to complete.
+//
+// Built from the install_blocked event rather than from a session, because
+// install_sessions and the per-package decisions never leave the machine. The
+// hub can say what was blocked and why; the dependency chain that led there is
+// only on the agent, and the page has to say so rather than implying it has it.
+type FleetBlock struct {
+	DeviceID   string
+	Hostname   string
+	At         time.Time
+	Tier       string
+	PURL       string
+	AdvisoryID string
+	Detail     string
+}
+
+// FleetBlocks returns the fleet's blocked installs, newest first.
+func (h Hub) FleetBlocks(limit int) ([]FleetBlock, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := h.DB.Query(`SELECT e.device_id, COALESCE(d.hostname, e.device_id),
+			e.ts, COALESCE(e.severity, ''), COALESCE(e.purl, ''),
+			COALESCE(e.advisory_id, ''), COALESCE(e.detail_json, '')
+		FROM fleet_events e LEFT JOIN devices d ON d.id = e.device_id
+		WHERE e.kind = ?
+		ORDER BY e.ts DESC LIMIT ?`, EventInstallBlocked, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FleetBlock
+	for rows.Next() {
+		var b FleetBlock
+		var at int64
+		if err := rows.Scan(&b.DeviceID, &b.Hostname, &at, &b.Tier,
+			&b.PURL, &b.AdvisoryID, &b.Detail); err != nil {
+			return nil, err
+		}
+		b.At = time.Unix(at, 0)
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// FleetInventoryRow is one package on one machine, or one machine that reports
+// no inventory at all.
+//
+// The second case is why this is a LEFT JOIN from devices. A machine at
+// sync_level = findings contributes no package rows, and a fleet inventory that
+// simply omitted it would describe a partial fleet as the whole one — the same
+// silence that the credential list had to be built to avoid.
+type FleetInventoryRow struct {
+	DeviceID  string
+	Hostname  string
+	SyncLevel string
+	Ecosystem string
+	Name      string
+	Version   string
+	Scope     string
+}
+
+// Reported says whether this row is a package rather than a placeholder for a
+// machine that sends none.
+func (r FleetInventoryRow) Reported() bool { return r.Name != "" }
+
+// FleetInventory lists the fleet's packages, and every approved machine
+// whether or not it sends any.
+func (h Hub) FleetInventory(ecosystem, scope string, limit int) ([]FleetInventoryRow, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+
+	// The filters apply to the package side of the join only. Moving them into
+	// the WHERE clause would drop the placeholder rows and take every
+	// non-reporting machine off the page the moment anyone filtered.
+	rows, err := h.DB.Query(`SELECT d.id, d.hostname, d.sync_level,
+			COALESCE(p.ecosystem, ''), COALESCE(p.name, ''),
+			COALESCE(p.version, ''), COALESCE(p.scope, '')
+		FROM devices d
+		LEFT JOIN fleet_packages p ON p.device_id = d.id
+			AND (? = '' OR p.ecosystem = ?)
+			AND (? = '' OR p.scope = ?)
+		WHERE d.status = ?
+		ORDER BY d.hostname, p.ecosystem, p.name, p.version
+		LIMIT ?`, ecosystem, ecosystem, scope, scope, DeviceStatusApproved, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FleetInventoryRow
+	for rows.Next() {
+		var r FleetInventoryRow
+		if err := rows.Scan(&r.DeviceID, &r.Hostname, &r.SyncLevel,
+			&r.Ecosystem, &r.Name, &r.Version, &r.Scope); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// FleetEcosystemCounts counts the fleet's packages per ecosystem.
+//
+// Counted over what was actually reported, which is not the same as what is
+// installed: machines the hub takes findings from contribute nothing here. The
+// caller pairs this with the count of those machines, so the total is never
+// presented as the fleet's whole software estate.
+func (h Hub) FleetEcosystemCounts() (map[string]int, error) {
+	rows, err := h.DB.Query(
+		"SELECT ecosystem, COUNT(*) FROM fleet_packages GROUP BY ecosystem")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var name string
+		var n int
+		if err := rows.Scan(&name, &n); err != nil {
+			return nil, err
+		}
+		counts[name] = n
+	}
+	return counts, rows.Err()
+}
+
 // FleetCredential is one row of "what could be read on this machine".
 //
 // A machine with nothing to report still produces one row, with ItemID empty:

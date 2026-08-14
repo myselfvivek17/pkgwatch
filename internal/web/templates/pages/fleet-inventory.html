@@ -1,0 +1,95 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">Inventory</h1>
+
+  {{with .Data}}
+  <form class="pw-filters" method="get" action="/inventory">
+    <label class="pw-filter">
+      <span>ecosystem</span>
+      <select name="ecosystem" onchange="this.form.submit()">
+        {{range .EcosystemFilter}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <label class="pw-filter">
+      <span>scope</span>
+      <select name="scope" onchange="this.form.submit()">
+        {{range .ScopeFilter}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+    </label>
+    <noscript><button type="submit">apply</button></noscript>
+  </form>
+
+  {{if .Ecosystems}}
+  <div class="pw-card">
+    <div class="pw-section-title">Reported across the fleet</div>
+    <table class="pw-table">
+      <thead><tr><th>ecosystem</th><th>packages</th><th>advisories</th></tr></thead>
+      <tbody>
+        {{range .Ecosystems}}
+        <tr>
+          <td>{{.Ecosystem}}</td>
+          <td class="pw-mono">{{.Count}}</td>
+          {{/* "Nothing matched it" and "nothing was wrong with it" are opposite
+               findings, so an ecosystem with no bundle says so on its own row
+               rather than blending into the clean ones. */}}
+          <td>{{if .Covered}}<span class="pw-dim">examined</span>{{else}}<span class="pw-eco pw-eco-uncovered">NOT EXAMINED — no bundle</span>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{if .Uncovered}}
+    <p class="pw-muted">
+      Packages in {{len .Uncovered}} ecosystem(s) are held but matched against nothing. They are
+      counted above and are absent from every finding, which is not the same as being clean.
+    </p>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{range .Machines}}
+  <div class="pw-card">
+    <div class="pw-section-title">{{.Hostname}}</div>
+    {{if .Withheld}}
+      <p class="pw-muted">
+        Not reported. This hub is set to accept findings only from this machine, so its packages
+        never leave it — the machine is not empty, this hub simply does not hold its inventory.
+        Turn on "accept inventory" for it on the pairing page to change that.
+      </p>
+    {{else if not .Rows}}
+      <p class="pw-muted">
+        No packages match the current filter on this machine.
+      </p>
+    {{else}}
+      <table class="pw-table">
+        <thead><tr><th>ecosystem</th><th>package</th><th>version</th><th>scope</th></tr></thead>
+        <tbody>
+          {{range .Rows}}
+          <tr>
+            <td class="pw-dim">{{.Ecosystem}}</td>
+            <td class="pw-wrap">{{.Name}}</td>
+            <td class="pw-mono">{{.Version}}</td>
+            <td class="pw-dim">{{.Scope}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    {{end}}
+  </div>
+  {{end}}
+
+  <div class="pw-notes">
+    {{if .Truncated}}
+    <p class="pw-muted">
+      The list stops at the row cap, so this is not the whole fleet. Filter by ecosystem or scope to
+      see the rest rather than reading this page as complete.
+    </p>
+    {{end}}
+    <p class="pw-muted">
+      {{.Total}} package(s) shown. Install paths and the retirement audit are agent-only — a
+      replicated row carries neither, so this page cannot tell you where a package sits on disk or
+      what replaced one that went away. Open that machine's own dashboard for either.
+    </p>
+  </div>
+  {{end}}
+</div>
+{{end}}

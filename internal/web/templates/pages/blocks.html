@@ -1,0 +1,66 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">Install block</h1>
+
+  {{with .Data}}
+  {{if not .Blocks}}
+    <div class="pw-card">
+      <p class="pw-muted">
+        {{if .Reporting}}
+          No install has been blocked on any of the {{.Reporting}} machine(s) reporting to this hub.
+          A machine that has stopped syncing would not appear here at all — the pairing page is
+          where that shows.
+        {{else}}
+          No machine is reporting to this hub yet, so this is not a statement about whether anything
+          was blocked. Approve a device on the pairing page first.
+        {{end}}
+      </p>
+    </div>
+  {{else}}
+    <table class="pw-table">
+      <thead>
+        <tr><th>machine</th><th>when</th><th>package</th><th>why</th><th>fix</th></tr>
+      </thead>
+      <tbody>
+        {{range .Blocks}}
+        <tr{{if eq .Tier "critical"}} class="pw-row-alarming"{{end}}>
+          <td>{{.Machine}}</td>
+          <td class="pw-mono pw-dim">{{.When}}</td>
+          <td class="pw-mono pw-wrap">
+            {{.PURL}}
+            <div class="pw-muted pw-dim">{{.AdvisoryID}}</div>
+          </td>
+          <td>
+            {{if .Summary}}<div>{{.Summary}}</div>{{end}}
+            {{if .Reason}}<div class="pw-muted pw-dim">{{.Reason}}</div>{{end}}
+            {{/* The chain is on the machine. Named with the command that gets
+                 there rather than linked, because agent dashboards bind
+                 loopback and an anchor would be dead from here. */}}
+            {{if .SessionID}}
+            <div class="pw-muted pw-dim pw-mono pw-wrap">
+              full report: {{.Reach}} → /sessions/{{.SessionID}}
+            </div>
+            {{end}}
+          </td>
+          <td class="pw-mono">{{if .FixedIn}}{{.FixedIn}}{{else}}<span class="pw-muted">none yet</span>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+
+    <div class="pw-notes">
+      <p class="pw-muted">
+        These are refusals to hand over bytes the resolver had already chosen. Versions quietly
+        withheld from a listing are not here and should not be: an ordinary install withholds dozens
+        of long-abandoned versions nobody asked for, and mixing the two buries the line that matters.
+      </p>
+      <p class="pw-muted">
+        The dependency chain that led to each block stays on the machine that blocked it. Install
+        sessions and their per-package verdicts are never synced, so this hub can say what was
+        refused and why, and nothing about what pulled it in.
+      </p>
+    </div>
+  {{end}}
+  {{end}}
+</div>
+{{end}}

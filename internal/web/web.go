@@ -60,12 +60,13 @@ func (s *Server) nav(active string) []NavItem {
 		{Key: "timeline", Label: "Timeline", Href: "/timeline", Enabled: s.Events != nil},
 		{Key: "findings", Label: "Findings triage", Href: "/findings", Enabled: s.Findings != nil},
 		{Key: "block", Label: "Install block", Href: "/sessions",
-			Enabled: s.Sessions != nil && s.SessionReport != nil},
+			Enabled: (s.Sessions != nil && s.SessionReport != nil) || s.FleetBlocks != nil},
 		{Key: "credentials", Label: "Credential rotation", Href: "/rotate",
 			Enabled: (s.Exposures != nil && s.Credentials != nil) ||
 				(s.FleetExposures != nil && s.FleetRotation != nil)},
 		{Key: "inventory", Label: "Inventory", Href: "/inventory",
-			Enabled: s.Inventory != nil && s.Ecosystems != nil},
+			Enabled: (s.Inventory != nil && s.Ecosystems != nil) ||
+				(s.FleetInventory != nil && s.FleetEcosystems != nil)},
 		{Key: "pairing", Label: "Device pairing", Href: "/devices", Enabled: s.Devices != nil},
 		{Key: "search", Label: "Package search", Href: "/search",
 			Enabled: s.SearchPackages != nil && s.InventoryCoverage != nil},
@@ -179,6 +180,14 @@ type Server struct {
 	// accepts an inventory from.
 	FleetCredentials func() ([]repo.FleetCredential, error)
 
+	// FleetBlocks, FleetInventory and FleetEcosystems back the hub's versions of
+	// the install block and inventory pages. Both are narrower than the agent's:
+	// sessions and their decisions never leave the machine, and a replicated
+	// package row carries no install path and no retirement history.
+	FleetBlocks     func(limit int) ([]repo.FleetBlock, error)
+	FleetInventory  func(ecosystem, scope string, limit int) ([]repo.FleetInventoryRow, error)
+	FleetEcosystems func() (map[string]int, error)
+
 	// Settings backs the settings page. Supplied by the daemon because only it
 	// knows which file it was started with — a page that read the default path
 	// would confidently describe a config this process never loaded.
@@ -284,7 +293,7 @@ func New(mode Mode, hostname string) (*Server, error) {
 	s := &Server{Mode: mode, Hostname: hostname, templates: map[string]*template.Template{}}
 	for _, page := range []string{"overview", "design", "timeline", "findings", "inventory",
 		"sessions", "session-report", "fleet", "devices", "search", "rotate", "quarantine",
-		"settings"} {
+		"settings", "blocks", "fleet-inventory"} {
 		tpl, err := template.ParseFS(assets,
 			"templates/layout.html",
 			"templates/partials/*.html",
@@ -344,12 +353,21 @@ func (s *Server) Routes(r chi.Router) {
 			r.Get("/timeline", s.handleTimeline)
 			r.Get("/events/stream", s.handleStream)
 		}
-		if s.Inventory != nil && s.Ecosystems != nil {
+		switch {
+		case s.Inventory != nil && s.Ecosystems != nil:
 			r.Get("/inventory", s.handleInventory)
+		case s.FleetInventory != nil && s.FleetEcosystems != nil:
+			r.Get("/inventory", s.handleFleetInventory)
 		}
-		if s.Sessions != nil && s.SessionReport != nil {
+		switch {
+		case s.Sessions != nil && s.SessionReport != nil:
 			r.Get("/sessions", s.handleSessions)
 			r.Get("/sessions/{id}", s.handleSessionReport)
+		case s.FleetBlocks != nil:
+			// No /sessions/{id} on a hub: the report is built from decisions
+			// that never left the machine, and a route that answered would be
+			// answering with an empty chain.
+			r.Get("/sessions", s.handleFleetBlocks)
 		}
 		// Read paths first, write paths nested inside them. The hub reaches the
 		// same two pages through its own handlers and never registers a POST at

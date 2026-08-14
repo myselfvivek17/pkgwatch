@@ -208,6 +208,15 @@ func Run(ctx context.Context, cfg config.Config) error {
 	srv.FleetCredentials = st.Repo.FleetCredentials
 	srv.Settings = func() web.SettingsData { return web.SettingsFrom(cfg, "hub") }
 
+	// Blocked installs and the fleet's inventory. Both narrower than the
+	// agent's: install sessions and their per-package verdicts never leave the
+	// machine, and a replicated package row carries neither an install path nor
+	// any retirement history — so there is no session report and no retirement
+	// audit here, and the pages say so rather than rendering empty ones.
+	srv.FleetBlocks = st.Repo.FleetBlocks
+	srv.FleetInventory = st.Repo.FleetInventory
+	srv.FleetEcosystems = st.Repo.FleetEcosystemCounts
+
 	router := chi.NewRouter()
 	router.Get("/health", daemon.HealthHandler("hub", started, func() (bool, string) {
 		return st.DB.PingContext(ctx) == nil, st.Bundle.Version
