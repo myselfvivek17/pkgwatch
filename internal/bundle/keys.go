@@ -16,19 +16,17 @@ import (
 // Order is current, then next. Adding a key is a code change and a release,
 // which is the point: no remote party can add one.
 var publisherKeysBase64 = []string{
-	// dev — signs every bundle on this fleet today. Still trusted because the
-	// corpus has not been re-signed yet; removing it before that would make
-	// `sync --rebuild` reject bundles already on disk. It goes in the release
-	// after the corpus moves to the production key, and that removal is what
-	// actually revokes it.
-	"JqEkbCJnKyEQd8nmlp41JjFp+cdgwDYADiyO+GG0krU=",
-
 	// production — generated 2026-08-14 on the maintainer's own machine; the
 	// private half has never been on the network and is not in this repository.
-	// Listed second because it is the *next* key, not yet the signing one:
-	// agents have to be able to verify it before anything is signed with it,
-	// and shipping it here is what makes that true.
+	// Signs the whole corpus as of that date.
 	"wb5p81lTC719T9xB/7tkwb/TUF67wkfKpepYaJycB5I=",
+
+	// The dev key that preceded it is gone from this list, and its removal is
+	// what revoked it: a bundle it signed no longer verifies anywhere, whoever
+	// holds the private half. Removing it was safe only because every bundle on
+	// the fleet had already been re-signed — dropping it earlier would have made
+	// `sync --rebuild` reject bundles sitting on disk, since a rebuild verifies
+	// from sources rather than trusting what is already merged.
 }
 
 // Default returns the verifier every agent uses.
