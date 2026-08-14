@@ -9,6 +9,8 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/myselfvivek17/pkgwatch/internal/repo"
+	"github.com/myselfvivek17/pkgwatch/internal/rotate"
 )
 
 //go:embed templates static
@@ -58,14 +61,15 @@ func (s *Server) nav(active string) []NavItem {
 		{Key: "findings", Label: "Findings triage", Href: "/findings", Enabled: s.Findings != nil},
 		{Key: "block", Label: "Install block", Href: "/sessions",
 			Enabled: s.Sessions != nil && s.SessionReport != nil},
-		{Key: "credentials", Label: "Credential rotation", Href: "/rotate"},
+		{Key: "credentials", Label: "Credential rotation", Href: "/rotate",
+			Enabled: s.Exposures != nil && s.Credentials != nil},
 		{Key: "inventory", Label: "Inventory", Href: "/inventory",
 			Enabled: s.Inventory != nil && s.Ecosystems != nil},
 		{Key: "pairing", Label: "Device pairing", Href: "/devices", Enabled: s.Devices != nil},
 		{Key: "search", Label: "Package search", Href: "/search",
 			Enabled: s.SearchPackages != nil && s.InventoryCoverage != nil},
 		{Key: "settings", Label: "Settings", Href: "/settings"},
-		{Key: "quarantine", Label: "Quarantine", Href: "/quarantine"},
+		{Key: "quarantine", Label: "Quarantine", Href: "/quarantine", Enabled: s.Quarantined != nil},
 	}
 	for i := range items {
 		items[i].Active = items[i].Key == active
@@ -140,6 +144,24 @@ type Server struct {
 	// Sessions and SessionReport back the install block report.
 	Sessions      func(limit int) ([]repo.Session, error)
 	SessionReport func(id string) (repo.Session, []repo.Decision, []repo.Withheld, error)
+
+	// Exposures, Credentials and RotationChecked back the credential rotation
+	// page; SetRotationChecked is its only write. Agent-only, all four: the
+	// credentials being rotated are files on this machine, and a hub asked to
+	// render someone else's checklist would be listing paths it cannot see.
+	Exposures          func() ([]repo.Finding, bool, error)
+	Credentials        func() []rotate.Item
+	RotationChecked    func(purl, advisoryID string) (map[string]time.Time, error)
+	SetRotationChecked func(purl, advisoryID, itemID string, at time.Time) error
+
+	// PackageExposure gives the window a package was present for, which is what
+	// scopes the urgency of a rotation.
+	PackageExposure func(purl string) (firstSeen, lastSeen time.Time, err error)
+
+	// Quarantined lists what has been moved out of the way, and Restore puts one
+	// back. Restore is separate because it is the write, and a hub never has it.
+	Quarantined func(limit int) ([]repo.QuarantineItem, error)
+	Restore     func(id string) error
 
 	// Devices, DeviceFindings and SetDeviceStatus back the fleet and pairing
 	// pages. Set on a hub only; an agent has no fleet, and its overview stays
@@ -240,7 +262,7 @@ type badgeRow struct {
 func New(mode Mode, hostname string) (*Server, error) {
 	s := &Server{Mode: mode, Hostname: hostname, templates: map[string]*template.Template{}}
 	for _, page := range []string{"overview", "design", "timeline", "findings", "inventory",
-		"sessions", "session-report", "fleet", "devices", "search"} {
+		"sessions", "session-report", "fleet", "devices", "search", "rotate", "quarantine"} {
 		tpl, err := template.ParseFS(assets,
 			"templates/layout.html",
 			"templates/partials/*.html",
@@ -307,6 +329,18 @@ func (s *Server) Routes(r chi.Router) {
 			r.Get("/sessions", s.handleSessions)
 			r.Get("/sessions/{id}", s.handleSessionReport)
 		}
+		if s.Exposures != nil && s.Credentials != nil {
+			r.Get("/rotate", s.handleRotate)
+			if s.SetRotationChecked != nil {
+				r.Post("/rotate/check", guard(s.handleRotateCheck))
+			}
+		}
+		if s.Quarantined != nil {
+			r.Get("/quarantine", s.handleQuarantine)
+			if s.Restore != nil {
+				r.Post("/quarantine/restore", guard(s.handleRestore))
+			}
+		}
 		if s.Findings != nil {
 			r.Get("/findings", s.handleFindings)
 			if s.Acknowledge != nil && s.Ignore != nil {
@@ -372,8 +406,13 @@ func (s *Server) render(w http.ResponseWriter, page, title, active string, data 
 		http.Error(w, "unknown page", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tpl.ExecuteTemplate(w, "layout", Page{
+	// Rendered into a buffer first. Executing straight into the ResponseWriter
+	// means a template error arrives after a partial page and a 200 — the page
+	// simply stops mid-tag, which is exactly what a missing field looked like on
+	// the rotation page: a checklist with one row instead of three, and nothing
+	// anywhere saying so.
+	var buf strings.Builder
+	if err := tpl.ExecuteTemplate(&buf, "layout", Page{
 		Mode:            s.Mode,
 		Title:           title,
 		Identity:        s.identity(),
@@ -385,10 +424,13 @@ func (s *Server) render(w http.ResponseWriter, page, title, active string, data 
 		SignedIn: s.Auth != nil,
 		Data:     data,
 	}); err != nil {
-		// Headers are already sent by now, so there is nothing useful to send
-		// the browser; the daemon's logger picks this up via the http.Server.
+		slog.Error("template failed to render", "page", page, "error", err)
+		http.Error(w, "this page failed to render: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	io.WriteString(w, buf.String())
 }
 
 func (s *Server) identity() string {

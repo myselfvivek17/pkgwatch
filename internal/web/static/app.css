@@ -576,3 +576,66 @@ input, button, select, textarea { font: inherit; }
   margin: 2px 0 0; font-size: 12px;
   color: var(--sev-high-fg);
 }
+
+/* ---- credential rotation -------------------------------------------------- */
+
+.pw-exposure { margin-bottom: 14px; }
+.pw-exposure-head {
+  display: flex; gap: 18px; align-items: flex-start; justify-content: space-between;
+  flex-wrap: wrap; margin-bottom: 12px;
+}
+.pw-exposure-head > div:first-child { min-width: 0; }
+.pw-exposure-progress { flex: 0 0 auto; text-align: right; display: grid; gap: 5px; }
+
+.pw-progress {
+  width: 150px; height: 6px; border-radius: 3px;
+  background: var(--bg-sunken); border: 1px solid var(--border); overflow: hidden;
+}
+.pw-progress-bar {
+  display: block; height: 100%; background: var(--accent);
+  /* Grows rather than jumps, matching the design's pw-bar-grow. */
+  animation: pw-bar-grow 420ms ease-out;
+}
+
+.pw-checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.pw-check {
+  display: flex; gap: 11px; align-items: flex-start;
+  padding: 9px 10px; border-radius: 6px; border: 1px solid transparent;
+}
+.pw-check + .pw-check { border-top: 1px solid var(--border); border-radius: 0; }
+.pw-check:hover { background: var(--bg-hover); }
+
+/* A ticked item stays legible rather than being greyed into unreadability:
+   "already rotated" is a fact worth re-reading when someone comes back to a
+   half-finished list an hour later. */
+.pw-check.is-done .pw-check-title { text-decoration: line-through; color: var(--text-dim); }
+
+.pw-check-box {
+  flex: 0 0 auto; width: 20px; height: 20px; margin-top: 1px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg-sunken); color: var(--accent);
+  border: 1px solid var(--border-strong); border-radius: 4px;
+  font: inherit; font-size: 12px; line-height: 1; cursor: pointer;
+}
+.pw-check-box:hover { border-color: var(--accent); }
+.pw-check-box:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.pw-check-body { min-width: 0; display: grid; gap: 2px; }
+.pw-check-title { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-weight: 600; }
+
+/* ---- quarantine ----------------------------------------------------------- */
+
+.pw-qstate {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 2px 7px; border-radius: 5px; border: 1px solid var(--border); color: var(--text-dim);
+}
+.pw-qstate-active { background: var(--sev-medium-bg); color: var(--sev-medium-fg); border-color: var(--sev-medium-border); }
+/* Restored is the only state that gets no alarm colour, and failed is the
+   loudest: files that came back wrong are worse than files still boxed up. */
+.pw-qstate-failed { background: var(--sev-critical-bg); color: var(--sev-critical-fg); border-color: var(--sev-critical-bg); }
+.pw-qstate-missing { background: var(--sev-high-bg); color: var(--sev-high-fg); border-color: var(--sev-high-border); }
+
+/* The exposed package's identifier, rendered as written. Section titles are
+   uppercased by design; a purl must not be, because npm names are
+   case-sensitive and an uppercased one names a package that does not exist. */
+.pw-exposure-purl { font-size: 13px; font-weight: 600; word-break: break-all; }

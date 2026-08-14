@@ -21,7 +21,9 @@ import (
 	"github.com/myselfvivek17/pkgwatch/internal/config"
 	"github.com/myselfvivek17/pkgwatch/internal/daemon"
 	"github.com/myselfvivek17/pkgwatch/internal/db"
+	"github.com/myselfvivek17/pkgwatch/internal/quarantine"
 	"github.com/myselfvivek17/pkgwatch/internal/repo"
+	"github.com/myselfvivek17/pkgwatch/internal/rotate"
 	"github.com/myselfvivek17/pkgwatch/internal/web"
 )
 
@@ -237,6 +239,29 @@ func Run(ctx context.Context, cfg config.Config) error {
 		})
 		return counts, st.Bundle.Ecosystems, err
 	}
+	// Credential rotation. Agent-only in every part: the credentials are files
+	// on this machine, and a hub rendering this checklist would be listing paths
+	// it cannot see and cannot tick honestly.
+	srv.Exposures = func() ([]repo.Finding, bool, error) {
+		var rows []repo.Finding
+		err := lease.Read(func() error {
+			var err error
+			rows, err = st.Repo.MalwareFindings(st.BundleAttached, 20)
+			return err
+		})
+		return rows, st.BundleAttached, err
+	}
+	srv.Credentials = func() []rotate.Item { return rotate.Detect(rotate.Home()) }
+	srv.RotationChecked = st.Repo.RotationChecked
+	srv.SetRotationChecked = st.Repo.SetRotationChecked
+	srv.PackageExposure = st.Repo.PackageExposure
+
+	srv.Quarantined = st.Repo.QuarantineItems
+	srv.Restore = func(id string) error {
+		_, err := quarantine.Restore(st.Repo, id, time.Now())
+		return err
+	}
+
 	// Writes only on the agent. A hub renders another machine's findings, and
 	// the agent is authoritative for its own data (§3.3).
 	srv.Acknowledge = st.Repo.AcknowledgeFinding

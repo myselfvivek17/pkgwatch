@@ -187,56 +187,16 @@ func restoreCmd() *cobra.Command {
 }
 
 func runRestore(cmd *cobra.Command, st *agent.State, id string) error {
-	item, err := st.Repo.QuarantineItem(id)
+	item, err := quarantine.Restore(st.Repo, id, time.Now())
 	if err != nil {
 		return err
 	}
-	if !item.Restorable() {
-		return fmt.Errorf("%s is in state %q, not %q — nothing to restore",
-			id, item.State, repo.QuarantineActive)
-	}
-	if _, err := os.Stat(item.ArchivePath); err != nil {
-		// Said as its own state rather than as a generic error: an archive that
-		// has been deleted means this package cannot come back at all, which is
-		// worth recording rather than reporting once and forgetting.
-		if markErr := st.Repo.MarkQuarantineMissing(id); markErr != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "note: could not record the missing archive: %v\n", markErr)
-		}
-		return fmt.Errorf("the archive for %s is gone (%s) — this package cannot be restored",
-			id, item.ArchivePath)
-	}
-	if _, err := os.Stat(item.OriginPath); err == nil {
-		return fmt.Errorf("%s already exists — refusing to unpack over it. Move it aside first",
-			item.OriginPath)
-	}
 
-	digest, err := quarantine.Unpack(item.ArchivePath, item.OriginPath)
-	if err != nil {
-		if markErr := st.Repo.MarkRestored(id, repo.QuarantineFailed, "", time.Now()); markErr != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "note: could not record the failure: %v\n", markErr)
-		}
-		return err
-	}
-
-	now := time.Now()
-	if digest != item.SHA256 {
-		if err := st.Repo.MarkRestored(id, repo.QuarantineFailed, digest, now); err != nil {
-			return err
-		}
-		return fmt.Errorf("RESTORED FILES DO NOT MATCH: took %s, put back %s. "+
-			"The files are at %s and are not what was removed", item.SHA256, digest, item.OriginPath)
-	}
-	if err := st.Repo.MarkRestored(id, repo.QuarantineRestored, digest, now); err != nil {
-		return err
-	}
-	if err := st.Repo.RecordEvent(repo.EventRestore, "high", item.PURL, item.AdvisoryID,
-		map[string]any{"id": id, "path": item.OriginPath}, now); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "note: could not record the event: %v\n", err)
-	}
-
-	fmt.Fprintf(cmd.OutOrStdout(), "restored %s to %s\n  digest %s (identical to what was taken)\n"+
-		"\nThe package is installed again and its findings apply again. Run `pkgwatch scan` to "+
-		"bring the inventory back in step.\n", item.PURL, item.OriginPath, digest)
+	fmt.Fprintf(cmd.OutOrStdout(),
+		"restored %s to %s\n  digest %s (identical to what was taken)\n\n"+
+			"The package is installed again and its findings apply again. Run `pkgwatch scan` to "+
+			"bring the inventory back in step.\n",
+		item.PURL, item.OriginPath, item.SHA256)
 	return nil
 }
 

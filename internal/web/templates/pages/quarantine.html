@@ -1,0 +1,67 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">Quarantine</h1>
+
+  {{with .Data}}
+  {{if not .Items}}
+    <div class="pw-card">
+      <p class="pw-muted">
+        Nothing is quarantined on this machine. <span class="pw-mono">pkgwatch quarantine &lt;purl&gt;</span>
+        archives a package, checks the archive can be read back, and only then deletes the original.
+      </p>
+    </div>
+  {{else}}
+    <table class="pw-table">
+      <thead>
+        <tr><th>id</th><th>state</th><th>when</th><th>package</th><th>taken from</th>
+          {{if .CanRestore}}<th></th>{{end}}</tr>
+      </thead>
+      <tbody>
+        {{range .Items}}
+        <tr{{if eq .State "failed"}} class="pw-row-alarming"{{end}}>
+          <td class="pw-mono">{{.ID}}</td>
+          <td><span class="pw-qstate pw-qstate-{{.State}}">{{.State}}</span></td>
+          <td class="pw-mono pw-dim">{{.When}}</td>
+          <td class="pw-mono pw-wrap">{{.PURL}}</td>
+          <td class="pw-mono pw-wrap pw-dim">{{.OriginPath}}</td>
+          {{if $.Data.CanRestore}}
+          <td class="pw-triage">
+            {{if .Restorable}}
+            <form method="post" action="/quarantine/restore">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button type="submit" title="unpack it back to where it was">restore</button>
+            </form>
+            {{end}}
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+
+    <div class="pw-notes">
+      {{if .Failed}}
+        <p class="pw-muted">
+          {{.Failed}} restore(s) did not reproduce what was taken. The files are back and they are
+          not the files that were removed — compare the two digests before trusting that tree.
+        </p>
+      {{end}}
+      {{if .Missing}}
+        <p class="pw-muted">
+          {{.Missing}} archive(s) are gone from disk. Those packages cannot be brought back.
+        </p>
+      {{end}}
+      <p class="pw-muted">
+        A restore is checked, not assumed: the tree is hashed after unpacking and compared with the
+        digest taken at quarantine time. Timestamps are excluded because no filesystem reproduces
+        them; names, contents, links and the executable bit are not.
+      </p>
+      <p class="pw-muted">
+        Findings for a quarantined package stay open. It is one restore away from being back, so a
+        count that dropped here would show this machine clean while the package sits in the archive.
+      </p>
+    </div>
+  {{end}}
+  {{end}}
+</div>
+{{end}}
