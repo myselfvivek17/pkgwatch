@@ -101,6 +101,29 @@ func TestAnUnknownChecklistItemIsRefused(t *testing.T) {
 	}
 }
 
+// A hub has none of these files, so it has no business serving either page.
+// Disabling the nav item is not enough on its own — a disabled link still
+// leaves the route reachable by typing it — so the routes are registered from
+// the same hooks the nav is derived from, and both must be absent together.
+func TestTheHubServesNeitherPage(t *testing.T) {
+	srv, err := New(ModeHub, "hub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.Overview = func() (OverviewData, error) { return OverviewData{Mode: "hub"}, nil }
+
+	r := chi.NewRouter()
+	srv.Routes(r)
+
+	for _, path := range []string{"/rotate", "/quarantine"} {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s answered %d on a hub, want 404", path, rec.Code)
+		}
+	}
+}
+
 // Without a bundle nothing can tell malware from a vulnerability, and the page
 // says that rather than rendering an empty list that reads as "nothing ran".
 func TestTheRotationPageSaysWhenItCannotTell(t *testing.T) {
