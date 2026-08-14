@@ -83,6 +83,7 @@ func Root() *cobra.Command {
 		restoreCmd(),
 		rotateCmd(),
 
+		healthCmd(),
 		scriptGuardCmd(),
 		allowScriptsCmd(),
 	)

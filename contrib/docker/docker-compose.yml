@@ -1,0 +1,64 @@
+# The hub, for a box that already runs its services this way.
+#
+#   docker compose -f contrib/docker/docker-compose.yml up -d
+#
+# Before the first start you need a password, because the hub refuses to come up
+# bound to a routable address without one — the dashboard approves installs and
+# deletes files, and unauthenticated on a LAN that is a remote code execution
+# primitive. Generate the hash with a binary on the host:
+#
+#   pkgwatch hub set-password
+#
+# and put the line it prints into the config file mounted below:
+#
+#   cp contrib/docker/pkgwatch.toml.example contrib/docker/pkgwatch.toml
+#
+# The agent is not here on purpose. It exists to inventory a host and to sit in
+# front of that host's package managers; in a container it would faithfully
+# report the container. Run it on the host with the systemd unit in
+# contrib/systemd/.
+
+services:
+  hub:
+    build:
+      context: ../..
+      dockerfile: contrib/docker/Dockerfile
+    image: pkgwatch:latest
+    container_name: pkgwatch-hub
+    restart: unless-stopped
+
+    # One volume covers everything the hub keeps: hub.db, the TLS keypair it
+    # generates on first run, and any advisory bundles it relays. Losing it
+    # means every agent has to be paired again — the device tokens live here.
+    volumes:
+      - pkgwatch-hub-data:/data
+      - ./pkgwatch.toml:/data/.local/share/pkgwatch/pkgwatch.toml:ro
+
+    # Published on the LAN address rather than 0.0.0.0. On a machine running
+    # Docker, 0.0.0.0 also means every container bridge and any VPN interface,
+    # which is a wider audience than "my network" and not one anybody pictures.
+    # Change the address to this host's.
+    ports:
+      - "192.168.0.198:4876:4876"
+
+    # Nothing in the hub needs to write outside its volume or gain privileges.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # The container has no shell, so this is the binary's own check — and it
+    # asks the socket rather than the database. `status` would report a healthy
+    # machine while the listener was dead, which is the shape of failure this
+    # whole project keeps finding: everything that looked at the process said
+    # fine, and nothing was serving.
+    healthcheck:
+      test: ["CMD", "/pkgwatch", "health"]
+      interval: 60s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  pkgwatch-hub-data:

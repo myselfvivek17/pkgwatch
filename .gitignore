@@ -9,6 +9,10 @@
 *.db-shm
 *.key
 
+# A real config, as opposed to the shipped example. It carries the hub's
+# argon2id password hash, which has no business in a repository.
+contrib/docker/pkgwatch.toml
+
 # Deliberate deviation from spec §1, which says to commit vendor/.
 # `go mod vendor` weighs 134 MB — 125 MB of it machine-generated
 # modernc.org/{libc,sqlite}, one file set per GOOS/GOARCH. go.sum already pins

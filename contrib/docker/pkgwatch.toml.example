@@ -1,0 +1,26 @@
+# Config for the hub in a container. Copy it next to docker-compose.yml:
+#
+#   cp pkgwatch.toml.example pkgwatch.toml
+#
+# and put a real password hash in it before the first start. The hub refuses to
+# come up bound to a routable address without one, which is deliberate: the
+# dashboard approves package installs and deletes files, and unauthenticated on
+# a LAN that is a remote code execution primitive rather than a convenience.
+
+[hub]
+# 0.0.0.0 inside the container is correct: the container's network namespace is
+# not the host's, and compose publishes the port on one host address. Binding
+# the host widely is the mistake worth avoiding, and that is done in the ports:
+# line, not here.
+bind = "0.0.0.0"
+port = 4876
+
+# From `pkgwatch hub set-password`, run with a binary on the host. It prints
+# this line; paste it. Never a plaintext password, and never one that travelled
+# through a shell history.
+# password_hash = "$argon2id$v=19$m=65536,t=3,p=4$..."
+
+# TLS is on by default and the hub generates a self-signed certificate into its
+# data directory on first run. Agents pin the fingerprint at pairing, so a CA
+# has nothing to add here — the trust comes from a person comparing it.
+# tls = true

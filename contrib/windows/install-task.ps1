@@ -63,5 +63,7 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
 Start-ScheduledTask -TaskName $TaskName
 
 Write-Host "Registered and started '$TaskName'."
-Write-Host "Health check: curl http://127.0.0.1:4875/health"
+# `pkgwatch health` over the task state on purpose: the state says Ready with
+# LastTaskResult 0 whether or not anything is listening.
+Write-Host "Health check: pkgwatch health"
 Write-Host "Remove with:  Unregister-ScheduledTask -TaskName $TaskName -Confirm:`$false"
