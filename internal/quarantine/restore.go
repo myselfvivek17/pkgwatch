@@ -60,6 +60,15 @@ func Restore(store repo.Agent, id string, now time.Time) (repo.QuarantineItem, e
 		return item, err
 	}
 
+	// The files are back, so the finding is back. Without this the row keeps the
+	// 'quarantined' state it was given when the package was taken away, and goes
+	// on claiming the package is contained while it sits on disk. The scan's
+	// present-packages pass reaches the same conclusion, but hours later.
+	if _, err := store.ReopenFindingsForRestored(item.PURL); err != nil {
+		return item, fmt.Errorf("restored, but its findings could not be reopened — "+
+			"they still read as quarantined: %w", err)
+	}
+
 	if err := store.RecordEvent(repo.EventRestore, "high", item.PURL, item.AdvisoryID,
 		map[string]any{"id": id, "path": item.OriginPath}, now); err != nil {
 		// The files are back; only the timeline row is missing. Reported rather

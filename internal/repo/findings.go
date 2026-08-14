@@ -222,13 +222,37 @@ func TierCounts(changes []FindingChange) map[string]int {
 // Keyed on score rather than tier, like the baseline rule: whether something is
 // worth announcing is a triage question and install context belongs in it,
 // while the tier says how bad the advisory is.
+// Quarantined counts as closed here too, and for a sharper reason than fixed
+// does. A quarantined finding claims the package is boxed up; if the files are
+// present again — restored from the dashboard, unpacked by hand, reinstalled —
+// then that claim is false, and a badge saying the malware is contained while
+// it sits on disk is the reassuring direction to be wrong in.
 func (a Agent) ReopenFindingsForPresentPackages() ([]FindingChange, error) {
 	return a.changed(`UPDATE findings
 		SET state = CASE WHEN score >= ? THEN ? ELSE ? END
-		WHERE state = ?
+		WHERE state IN (?, ?)
 		  AND purl IN (SELECT purl FROM packages WHERE gone_at IS NULL)
 		RETURNING purl, advisory_id, tier`,
-		AnnounceAbove, StateNew, StateAcknowledged, StateFixed)
+		AnnounceAbove, StateNew, StateAcknowledged, StateFixed, StateQuarantined)
+}
+
+// ReopenFindingsForRestored puts one package's findings back in play the moment
+// it is restored, rather than waiting for a scan to notice.
+//
+// The scan converges on the same answer, but it can be hours away, and the
+// restore button is on the page that shows the state — leaving a stale
+// "quarantined" badge next to a package somebody just put back is how a page
+// teaches you not to trust it.
+//
+// Ignored and fixed are left alone: fixed means a later scan found the package
+// genuinely gone, which a restore of an older archive does not contradict on
+// its own, and the present-packages pass will reopen it if the files are there.
+func (a Agent) ReopenFindingsForRestored(purl string) ([]FindingChange, error) {
+	return a.changed(`UPDATE findings
+		SET state = CASE WHEN score >= ? THEN ? ELSE ? END
+		WHERE purl = ? AND state = ?
+		RETURNING purl, advisory_id, tier`,
+		AnnounceAbove, StateNew, StateAcknowledged, purl, StateQuarantined)
 }
 
 // OpenFindings returns findings that still want attention, worst first, with
