@@ -170,6 +170,52 @@
       {{end}}
     </div>
   {{end}}
+
+  {{/* Outside the three states above on purpose. What an install script could
+       read is worth knowing before anything has gone wrong — which is the same
+       argument the agent's own "what is here anyway" card makes, one machine at
+       a time. */}}
+  {{if .Machines}}
+  <div class="pw-card">
+    <div class="pw-section-title">What could be read on each machine</div>
+    <p class="pw-muted">
+      Credentials that exist right now, worst blast radius first. Nothing here is a finding — this is
+      the blast radius if one of these machines ever runs a malicious install script.
+    </p>
+
+    {{range .Machines}}
+    <div class="pw-machine-creds">
+      <div class="pw-check-title">{{.Hostname}}</div>
+      {{if .Withheld}}
+        <p class="pw-muted">
+          Not reported. This hub is set to accept findings only from this machine, and a credential
+          map is inventory — turn on "accept inventory" for it on the pairing page to see this.
+          That is a deliberate setting, not a fault.
+        </p>
+      {{else if not .Items}}
+        <p class="pw-muted">
+          None of the credential files this looks for exist on that machine. Not the same as nothing
+          being exposed: project .env files, environment variables and password manager caches are
+          outside what any of this can see.
+        </p>
+      {{else}}
+        <table class="pw-table">
+          <thead><tr><th>category</th><th>what</th><th>where</th></tr></thead>
+          <tbody>
+            {{range .Items}}
+            <tr>
+              <td class="pw-dim">{{.Category}}</td>
+              <td>{{.Label}}</td>
+              <td class="pw-mono pw-wrap pw-dim">{{.Path}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+  {{end}}
   {{end}}
 </div>
 {{end}}

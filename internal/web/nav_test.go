@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/myselfvivek17/pkgwatch/internal/repo"
+	"github.com/myselfvivek17/pkgwatch/internal/rotate"
 )
 
 // The hub's sidebar offered Findings triage, Install block and Inventory while
@@ -52,6 +53,15 @@ func assertNoDeadLinks(t *testing.T, h http.Handler, links []string) {
 // A hub wired the way hub.Run wires one.
 func hubServer(t *testing.T) http.Handler {
 	t.Helper()
+	_, h := hubServerWith(t, nil)
+	return h
+}
+
+// hubServerWith is the same, with a hook for tests that need one reader to
+// answer differently. tweak runs before the routes are registered, because
+// which routes exist is itself derived from the hooks.
+func hubServerWith(t *testing.T, tweak func(*Server)) (*Server, http.Handler) {
+	t.Helper()
 	srv, err := New(ModeHub, "homelab")
 	if err != nil {
 		t.Fatal(err)
@@ -90,10 +100,24 @@ func hubServer(t *testing.T) http.Handler {
 			PURL: "pkg:npm/zwitch@2.0.4", State: repo.QuarantineActive, At: time.Now(),
 		}}, nil
 	}
+	// Two machines in different states: one sending its credential list, one the
+	// hub does not accept an inventory from. The second is the LEFT JOIN's
+	// single empty row, which is what keeps it on the page at all.
+	srv.FleetCredentials = func() ([]repo.FleetCredential, error) {
+		return []repo.FleetCredential{
+			{DeviceID: "dev-1", Hostname: "laptop", SyncLevel: repo.SyncLevelFull,
+				ItemID: "ssh", Category: rotate.CategorySSH, Path: "/home/x/.ssh/id_ed25519"},
+			{DeviceID: "dev-2", Hostname: "server", SyncLevel: repo.SyncLevelFindings},
+		}, nil
+	}
+
+	if tweak != nil {
+		tweak(srv)
+	}
 
 	r := chi.NewRouter()
 	srv.Routes(r)
-	return r
+	return srv, r
 }
 
 func TestHubSidebarOffersNoDeadLinks(t *testing.T) {

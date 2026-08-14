@@ -174,6 +174,11 @@ type Server struct {
 	FleetRotation   func() ([]repo.FleetRotationTick, error)
 	FleetQuarantine func(limit int) ([]repo.FleetQuarantineRow, error)
 
+	// FleetCredentials is what each machine reports it holds, shown whether or
+	// not anything has gone wrong there. Populated only for devices the hub
+	// accepts an inventory from.
+	FleetCredentials func() ([]repo.FleetCredential, error)
+
 	// Devices, DeviceFindings and SetDeviceStatus back the fleet and pairing
 	// pages. Set on a hub only; an agent has no fleet, and its overview stays
 	// the single-machine one.

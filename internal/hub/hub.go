@@ -205,6 +205,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 	srv.FleetRotation = st.Repo.FleetRotation
 	srv.FleetQuarantine = st.Repo.FleetQuarantine
+	srv.FleetCredentials = st.Repo.FleetCredentials
 
 	router := chi.NewRouter()
 	router.Get("/health", daemon.HealthHandler("hub", started, func() (bool, string) {

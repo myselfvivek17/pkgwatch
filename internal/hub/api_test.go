@@ -543,6 +543,60 @@ func TestRotationAndQuarantineReplicateAsSnapshots(t *testing.T) {
 	}
 }
 
+// A credential map is inventory-class and gated the same way.
+//
+// It names which machine holds which keys and where. An agent that decided on
+// its own to start sending that would be handing the hub a targeting list, so
+// the hub's record of the level decides — the same rule the package inventory
+// follows (§3.3), applied to the more valuable of the two.
+func TestCredentialsAreIgnoredBelowFullSyncLevel(t *testing.T) {
+	h := newHarness(t)
+	id, resp := h.enrol(t)
+	if err := h.state.Repo.SetDeviceStatus(id.ID(), repo.DeviceStatusApproved, h.now); err != nil {
+		t.Fatal(err)
+	}
+	client := h.client(id, resp.Token)
+
+	creds := []fleet.Credential{
+		{ID: "aws", Category: "cloud", Path: "/home/x/.aws/credentials", Rank: 0},
+		{ID: "ssh", Category: "ssh", Path: "/home/x/.ssh/id_ed25519", Rank: 1},
+	}
+
+	// The device enrols at findings level, so this must be dropped.
+	out, err := client.Push(fleet.SyncRequest{
+		Version: "test", Credentials: creds, CredentialsComplete: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Credentials != 0 {
+		t.Fatalf("stored %d credentials at findings level, want 0", out.Credentials)
+	}
+
+	// And accepted once the hub is set to take this machine's inventory.
+	if err := h.state.Repo.SetDeviceSyncLevel(id.ID(), repo.SyncLevelFull); err != nil {
+		t.Fatal(err)
+	}
+	if out, err = client.Push(fleet.SyncRequest{
+		Version: "test", Credentials: creds, CredentialsComplete: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if out.Credentials != 2 {
+		t.Errorf("stored %d credentials at full level, want 2", out.Credentials)
+	}
+
+	rows, err := h.state.Repo.FleetCredentials()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ordering is the agent's, worst blast radius first — not the hub's idea of
+	// alphabetical, which would put AWS keys under SSH.
+	if len(rows) != 2 || rows[0].ItemID != "aws" {
+		t.Errorf("rows = %+v, want the agent's ordering preserved", rows)
+	}
+}
+
 // A truncated response snapshot must not be applied as a complete one, for the
 // same reason findings must not: the replace deletes whatever it left out, and
 // here that erases work somebody actually did.

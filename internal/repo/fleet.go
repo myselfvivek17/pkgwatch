@@ -370,6 +370,85 @@ func (h Hub) FleetQuarantine(limit int) ([]FleetQuarantineRow, error) {
 	return out, rows.Err()
 }
 
+// FleetCredential is one row of "what could be read on this machine".
+//
+// A machine with nothing to report still produces one row, with ItemID empty:
+// the list is per-machine, and a machine missing from it entirely would read as
+// one with no credentials rather than one that never said.
+type FleetCredential struct {
+	DeviceID  string
+	Hostname  string
+	SyncLevel string
+	ItemID    string
+	Category  string
+	Path      string
+}
+
+// ReplaceCredentials swaps in what a machine reports it holds.
+//
+// Replaced, so deleting a credential file reaches the hub. A merge would leave
+// the hub listing an AWS key that was removed months ago, and sending someone
+// to rotate a credential that no longer exists teaches them to distrust the page.
+func (h Hub) ReplaceCredentials(deviceID string, items []FleetCredential, ranks []int) (int, error) {
+	tx, err := h.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM fleet_credentials WHERE device_id = ?", deviceID); err != nil {
+		return 0, err
+	}
+
+	stmt, err := tx.Prepare(`INSERT INTO fleet_credentials
+		(device_id, item_id, category, path, rank) VALUES (?,?,?,?,?)`)
+	if err != nil {
+		return 0, err
+	}
+	defer stmt.Close()
+
+	for i, c := range items {
+		rank := i
+		if i < len(ranks) {
+			rank = ranks[i]
+		}
+		if _, err := stmt.Exec(deviceID, c.ItemID, c.Category, c.Path, rank); err != nil {
+			return 0, err
+		}
+	}
+	return len(items), tx.Commit()
+}
+
+// FleetCredentials lists what each approved machine holds.
+//
+// A LEFT JOIN from devices, deliberately: every approved machine appears
+// whether or not it has reported credentials, carrying its sync level so the
+// page can tell "this machine holds none" from "this hub is not set to receive
+// them". Those render identically otherwise, and only one of them is good news.
+func (h Hub) FleetCredentials() ([]FleetCredential, error) {
+	rows, err := h.DB.Query(`SELECT d.id, d.hostname, d.sync_level,
+			COALESCE(c.item_id, ''), COALESCE(c.category, ''), COALESCE(c.path, '')
+		FROM devices d
+		LEFT JOIN fleet_credentials c ON c.device_id = d.id
+		WHERE d.status = ?
+		ORDER BY d.hostname, c.rank`, DeviceStatusApproved)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FleetCredential
+	for rows.Next() {
+		var c FleetCredential
+		if err := rows.Scan(&c.DeviceID, &c.Hostname, &c.SyncLevel,
+			&c.ItemID, &c.Category, &c.Path); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // FleetEvents returns the fleet timeline, reusing the agent timeline's filter
 // and row type so one set of templates renders both (§8).
 //

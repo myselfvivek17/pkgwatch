@@ -167,6 +167,42 @@ func TestAWithheldPathSaysSoOnTheHub(t *testing.T) {
 	}
 }
 
+// The credential list is shown with no malware anywhere, and a machine that
+// does not send one is distinguished from a machine that has none.
+//
+// These two render identically if nobody thinks about it — an empty table — and
+// only one of them is good news. "No credentials on that box" and "this hub is
+// not set to receive them" are opposite facts.
+func TestTheHubListsCredentialsWithoutAnyMalware(t *testing.T) {
+	srv, h := hubServerWith(t, func(s *Server) {
+		s.FleetExposures = func() ([]repo.FleetExposure, bool, error) { return nil, true, nil }
+	})
+	_ = srv
+
+	body := get(t, h, "/rotate").Body.String()
+
+	if !strings.Contains(body, "Nothing to rotate") {
+		t.Error("expected the no-malware state")
+	}
+	// ...and the credential list all the same, which is the point.
+	for _, want := range []string{"What could be read on each machine", "laptop",
+		"SSH private keys", "/home/x/.ssh/id_ed25519"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("%q is missing — the list must not depend on a malware finding", want)
+		}
+	}
+	// The findings-level machine says why it is empty.
+	if !strings.Contains(body, "server") {
+		t.Error("a machine that reports no credentials vanished from the list")
+	}
+	if !strings.Contains(body, "accept inventory") {
+		t.Error("a withheld credential list rendered as a machine holding none")
+	}
+	if !strings.Contains(body, "</html>") {
+		t.Error("the page stopped before the end of the document")
+	}
+}
+
 // Without a bundle nothing can tell malware from a vulnerability, and the page
 // says that rather than rendering an empty list that reads as "nothing ran".
 func TestTheRotationPageSaysWhenItCannotTell(t *testing.T) {

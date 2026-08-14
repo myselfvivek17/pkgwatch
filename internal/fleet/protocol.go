@@ -118,6 +118,24 @@ type RotationTick struct {
 	CheckedAt  time.Time `json:"checked_at,omitzero"`
 }
 
+// Credential is one credential file that exists on the machine.
+//
+// Sent only at sync_level = full, and gated by the hub's record of the level
+// exactly as the inventory is. This is not a finding: it is an unconditional
+// map of which machine holds which keys and where, which is worth more to an
+// attacker than the package list it travels beside. A fleet that wants findings
+// only gets none of it.
+//
+// Rank is the agent's own ordering, worst blast radius first. Preserved rather
+// than recomputed because the ordering is a judgement the agent already made,
+// and a hub sorting alphabetically would put AWS keys under SSH.
+type Credential struct {
+	ID       string `json:"id"`
+	Category string `json:"category"`
+	Path     string `json:"path"`
+	Rank     int    `json:"rank"`
+}
+
 // Quarantined is one package this machine has moved out of the way.
 //
 // OriginPath is omitted below sync_level = full: it is a filesystem path, which
@@ -154,6 +172,9 @@ type SyncRequest struct {
 	Rotation   []RotationTick `json:"rotation,omitempty"`
 	Quarantine []Quarantined  `json:"quarantine,omitempty"`
 
+	// Credentials is what exists on the machine, sent only at full.
+	Credentials []Credential `json:"credentials,omitempty"`
+
 	// FindingsComplete says whether Findings is the whole set. A truncated
 	// snapshot must not be treated as one, or the hub deletes everything the
 	// push happened to leave out.
@@ -165,6 +186,12 @@ type SyncRequest struct {
 	// rotation read — which is exactly the deletion this guard exists to stop.
 	RotationComplete   bool `json:"rotation_complete"`
 	QuarantineComplete bool `json:"quarantine_complete"`
+
+	// CredentialsComplete distinguishes "this machine has none" from "this push
+	// did not carry them". Without it a findings-level agent's empty list would
+	// clear the hub's record and render every machine as holding no credentials
+	// at all — the most reassuring possible way to be wrong.
+	CredentialsComplete bool `json:"credentials_complete"`
 }
 
 // SyncResponse acknowledges a push.
@@ -179,6 +206,7 @@ type SyncResponse struct {
 	Packages        int   `json:"packages"`
 	Rotation        int   `json:"rotation"`
 	Quarantine      int   `json:"quarantine"`
+	Credentials     int   `json:"credentials"`
 }
 
 // ErrorResponse is what every refusal carries.

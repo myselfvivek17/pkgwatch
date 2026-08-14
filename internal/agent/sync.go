@@ -14,6 +14,7 @@ import (
 	"github.com/myselfvivek17/pkgwatch/internal/device"
 	"github.com/myselfvivek17/pkgwatch/internal/fleet"
 	"github.com/myselfvivek17/pkgwatch/internal/repo"
+	"github.com/myselfvivek17/pkgwatch/internal/rotate"
 )
 
 // Backoff bounds, and the steady-state interval between pushes (§7).
@@ -199,6 +200,16 @@ func syncOnce(cfg config.Config) syncOutcome {
 	}
 
 	if level == "full" {
+		// What a malicious install script could read here. Detected fresh rather
+		// than stored: these are a dozen stat calls, and a cached list would go
+		// on reporting a key that has since been deleted.
+		for i, item := range rotate.Detect(rotate.Home()) {
+			push.Credentials = append(push.Credentials, fleet.Credential{
+				ID: item.ID, Category: item.Category, Path: item.Path, Rank: i,
+			})
+		}
+		push.CredentialsComplete = true
+
 		packages, err := store.SyncablePackages()
 		if err != nil {
 			slog.Warn("could not read packages for sync", "error", err)

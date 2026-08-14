@@ -28,6 +28,22 @@ type RotateData struct {
 	// each agent and sync is outbound-only (§7), so the hub has no channel to
 	// write a tick back down — a checkbox here would be a button that lies.
 	ReadOnly bool
+
+	// Machines is the hub's per-machine credential list. Shown with or without
+	// a malware finding: what an install script could read is worth knowing
+	// before the day it matters, which is the whole argument for the agent's
+	// own version of this card.
+	Machines []MachineCredentials
+}
+
+// MachineCredentials is what one machine reports it holds.
+type MachineCredentials struct {
+	Hostname string
+	Items    []rotate.Item
+
+	// Withheld means this device is not set to send them, so an empty list is
+	// "this hub does not receive them" rather than "this machine holds none".
+	Withheld bool
 }
 
 // Exposure is one malware finding and its checklist.
@@ -165,7 +181,49 @@ func (s *Server) handleFleetRotate(w http.ResponseWriter, r *http.Request) {
 		data.Exposures = append(data.Exposures, exposure)
 	}
 
+	if data.Machines, err = s.fleetCredentials(); err != nil {
+		http.Error(w, "credential list unavailable: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	s.render(w, "rotate", "Credential rotation", "credentials", data)
+}
+
+// fleetCredentials groups the replicated credential rows by machine.
+func (s *Server) fleetCredentials() ([]MachineCredentials, error) {
+	if s.FleetCredentials == nil {
+		return nil, nil
+	}
+	rows, err := s.FleetCredentials()
+	if err != nil {
+		return nil, err
+	}
+
+	var out []MachineCredentials
+	byHost := map[string]int{}
+	for _, row := range rows {
+		at, seen := byHost[row.DeviceID]
+		if !seen {
+			out = append(out, MachineCredentials{
+				Hostname: row.Hostname,
+				Withheld: row.SyncLevel != repo.SyncLevelFull,
+			})
+			at = len(out) - 1
+			byHost[row.DeviceID] = at
+		}
+		// The empty ItemID is the LEFT JOIN's "this machine reported none" row,
+		// which exists so the machine still appears. It is not a credential.
+		if row.ItemID == "" {
+			continue
+		}
+		item := rotate.Describe(row.ItemID)
+		item.Path = row.Path
+		if row.Category != "" {
+			item.Category = row.Category
+		}
+		out[at].Items = append(out[at].Items, item)
+	}
+	return out, nil
 }
 
 // reachCommand is how to open a machine's own dashboard from here.

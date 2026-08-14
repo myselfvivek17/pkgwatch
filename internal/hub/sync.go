@@ -138,6 +138,32 @@ func (s *State) handleSync(now func() time.Time) http.HandlerFunc {
 			slog.Warn("ignored a partial quarantine snapshot", "device", dev.ID, "count", len(req.Quarantine))
 		}
 
+		// Credentials, on exactly the terms the inventory travels on. A map of
+		// which machine holds which keys is worth more to an attacker than the
+		// package list, so the hub's record of the level is what decides —
+		// never the agent's claim about itself (§3.3).
+		if dev.SyncLevel != repo.SyncLevelFull && len(req.Credentials) > 0 {
+			slog.Warn("dropped a credential list this hub is not set to accept",
+				"device", dev.ID, "credentials", len(req.Credentials),
+				"hub_level", dev.SyncLevel,
+				"fix", "press \"accept inventory\" for this device on the pairing page")
+		}
+		if dev.SyncLevel == repo.SyncLevelFull && req.CredentialsComplete {
+			creds := make([]repo.FleetCredential, 0, len(req.Credentials))
+			ranks := make([]int, 0, len(req.Credentials))
+			for _, c := range req.Credentials {
+				creds = append(creds, repo.FleetCredential{
+					ItemID: c.ID, Category: c.Category, Path: c.Path,
+				})
+				ranks = append(ranks, c.Rank)
+			}
+			if resp.Credentials, err = s.Repo.ReplaceCredentials(dev.ID, creds, ranks); err != nil {
+				slog.Error("could not store fleet credentials", "device", dev.ID, "error", err)
+				refuse(w, http.StatusInternalServerError, fleet.CodeBadRequest, "could not store credentials")
+				return
+			}
+		}
+
 		// Touched last, and only on success. last_seen_at is what the fleet page
 		// reads to decide a machine is reporting; setting it on a push that then
 		// failed to store anything would render a broken agent as healthy.

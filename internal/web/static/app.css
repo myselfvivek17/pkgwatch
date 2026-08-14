@@ -628,6 +628,11 @@ input, button, select, textarea { font: inherit; }
 
 .pw-check-body { min-width: 0; display: grid; gap: 2px; }
 
+/* One machine's credential list on the hub. Separated by a rule rather than a
+   card each, so a fleet of ten does not become ten boxes to scroll past. */
+.pw-machine-creds { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.pw-machine-creds:first-of-type { margin-top: 10px; padding-top: 0; border-top: 0; }
+
 /* How to reach the machine that owns the checklist. A command, not a link:
    agent dashboards bind loopback. */
 .pw-reach {
