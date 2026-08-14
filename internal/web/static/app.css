@@ -534,11 +534,12 @@ input, button, select, textarea { font: inherit; }
 }
 .pw-section-head .pw-section-title { margin: 0; }
 
-/* align-items: start, or the grid stretches whichever column is shorter to
-   match the taller one and the bar plot grows to fill it. */
+/* Columns stretch to the same height and the bar plot grows into whatever the
+   card gives it. The alternative — a fixed plot height — leaves the taller
+   column dictating a page of empty space beside the chart. */
 .pw-charts {
   display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
-  gap: 12px; align-items: start;
+  gap: 12px; align-items: stretch;
 }
 @media (max-width: 900px) { .pw-charts { grid-template-columns: minmax(0, 1fr); } }
 
@@ -554,10 +555,10 @@ input, button, select, textarea { font: inherit; }
 .pw-chart-title { font-size: 12.5px; font-weight: 600; color: var(--text); }
 .pw-legend { display: flex; gap: 6px; flex-wrap: wrap; }
 
-/* Bounded rather than flex-grown: the plot is a fourteen-day shape, not a
-   column of whatever height the card next to it happens to be. */
+/* Fills the card, with a floor so the plot is still readable when the column
+   beside it is short. */
 .pw-bars {
-  height: 150px; display: grid; grid-auto-columns: minmax(0, 1fr);
+  flex: 1; min-height: 190px; display: grid; grid-auto-columns: minmax(0, 1fr);
   grid-auto-flow: column; gap: 5px;
 }
 .pw-bar-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; height: 100%; }
