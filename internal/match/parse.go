@@ -18,12 +18,28 @@ import (
 // same (ecosystem, name) pair the collector started from. Two spellings of that
 // reversal means one of them silently finds no advisories.
 func ParsePURL(raw string) (Package, error) {
+	pkg, err := ParsePURLBase(raw)
+	if err != nil {
+		return Package{}, err
+	}
+	if pkg.Version == "" {
+		return Package{}, fmt.Errorf("purl has no version: %s", raw)
+	}
+	return pkg, nil
+}
+
+// ParsePURLBase is the same reversal without requiring a version.
+//
+// The script allowlist is keyed by a versionless purl — allowing a package and
+// then upgrading it must not silently re-block its build — so it needs the name
+// back out of a string ParsePURL is right to refuse. Sharing the body rather
+// than relaxing ParsePURL keeps the version check where matching needs it,
+// which is the whole reason this file exists: two spellings of the reversal
+// means one of them silently finds no advisories.
+func ParsePURLBase(raw string) (Package, error) {
 	parsed, err := packageurl.FromString(raw)
 	if err != nil {
 		return Package{}, fmt.Errorf("not a valid purl: %w", err)
-	}
-	if parsed.Version == "" {
-		return Package{}, fmt.Errorf("purl has no version: %s", raw)
 	}
 
 	ecosystem, err := ecosystemFromPURL(parsed)

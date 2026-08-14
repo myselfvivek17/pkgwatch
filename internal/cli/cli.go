@@ -83,8 +83,8 @@ func Root() *cobra.Command {
 		restoreCmd(),
 		rotateCmd(),
 
-		stub("enable-script-guard", "Set ignore-scripts globally and seed the allowlist", "M6", cobra.NoArgs),
-		stub("allow-scripts <package>", "Allow install scripts for one package", "M6", cobra.ExactArgs(1)),
+		scriptGuardCmd(),
+		allowScriptsCmd(),
 	)
 	return root
 }
