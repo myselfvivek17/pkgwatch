@@ -628,6 +628,20 @@ input, button, select, textarea { font: inherit; }
 
 .pw-check-body { min-width: 0; display: grid; gap: 2px; }
 
+/* ---- settings ------------------------------------------------------------- */
+
+.pw-setting-note { font-size: 11.5px; margin-top: 2px; max-width: 46ch; }
+
+/* "default" and "set in config" is the distinction the page exists for, so it
+   carries colour rather than being another line of grey text. */
+.pw-source {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 2px 7px; border-radius: 5px; border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.pw-source-default { color: var(--text-faint); }
+.pw-source-file { color: var(--accent); border-color: var(--accent); }
+
 /* One machine's credential list on the hub. Separated by a rule rather than a
    card each, so a fleet of ten does not become ten boxes to scroll past. */
 .pw-machine-creds { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }

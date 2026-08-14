@@ -69,7 +69,7 @@ func (s *Server) nav(active string) []NavItem {
 		{Key: "pairing", Label: "Device pairing", Href: "/devices", Enabled: s.Devices != nil},
 		{Key: "search", Label: "Package search", Href: "/search",
 			Enabled: s.SearchPackages != nil && s.InventoryCoverage != nil},
-		{Key: "settings", Label: "Settings", Href: "/settings"},
+		{Key: "settings", Label: "Settings", Href: "/settings", Enabled: s.Settings != nil},
 		{Key: "quarantine", Label: "Quarantine", Href: "/quarantine",
 			Enabled: s.Quarantined != nil || s.FleetQuarantine != nil},
 	}
@@ -179,6 +179,11 @@ type Server struct {
 	// accepts an inventory from.
 	FleetCredentials func() ([]repo.FleetCredential, error)
 
+	// Settings backs the settings page. Supplied by the daemon because only it
+	// knows which file it was started with — a page that read the default path
+	// would confidently describe a config this process never loaded.
+	Settings func() SettingsData
+
 	// Devices, DeviceFindings and SetDeviceStatus back the fleet and pairing
 	// pages. Set on a hub only; an agent has no fleet, and its overview stays
 	// the single-machine one.
@@ -278,7 +283,8 @@ type badgeRow struct {
 func New(mode Mode, hostname string) (*Server, error) {
 	s := &Server{Mode: mode, Hostname: hostname, templates: map[string]*template.Template{}}
 	for _, page := range []string{"overview", "design", "timeline", "findings", "inventory",
-		"sessions", "session-report", "fleet", "devices", "search", "rotate", "quarantine"} {
+		"sessions", "session-report", "fleet", "devices", "search", "rotate", "quarantine",
+		"settings"} {
 		tpl, err := template.ParseFS(assets,
 			"templates/layout.html",
 			"templates/partials/*.html",
@@ -357,6 +363,9 @@ func (s *Server) Routes(r chi.Router) {
 			}
 		case s.FleetExposures != nil && s.FleetRotation != nil:
 			r.Get("/rotate", s.handleFleetRotate)
+		}
+		if s.Settings != nil {
+			r.Get("/settings", s.handleSettings)
 		}
 		switch {
 		case s.Quarantined != nil:

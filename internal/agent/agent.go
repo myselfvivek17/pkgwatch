@@ -252,6 +252,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		return rows, st.BundleAttached, err
 	}
 	srv.Credentials = func() []rotate.Item { return rotate.Detect(rotate.Home()) }
+	srv.Settings = func() web.SettingsData { return web.SettingsFrom(cfg, "agent") }
 	srv.RotationChecked = st.Repo.RotationChecked
 	srv.SetRotationChecked = st.Repo.SetRotationChecked
 	srv.PackageExposure = st.Repo.PackageExposure

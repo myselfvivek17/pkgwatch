@@ -28,6 +28,12 @@ type Config struct {
 	DataDir string      `toml:"data_dir"`
 	Agent   AgentConfig `toml:"agent"`
 	Hub     HubConfig   `toml:"hub"`
+
+	// Path is the file this was loaded from, filled in by Load and never read
+	// from the file itself. A daemon started with --config otherwise has no way
+	// to say which file it is running on, and a settings page that guessed the
+	// default path would confidently describe a config this process never read.
+	Path string `toml:"-"`
 }
 
 type AgentConfig struct {
@@ -181,6 +187,7 @@ func Load(path string) (Config, error) {
 	if path == "" {
 		path = DefaultPath()
 	}
+	cfg.Path = path
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			applyScoringPolicy(cfg)
@@ -191,6 +198,7 @@ func Load(path string) (Config, error) {
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	cfg.Path = path
 	applyScoringPolicy(cfg)
 	return withResolvedDataDir(cfg)
 }

@@ -1,0 +1,65 @@
+{{define "content"}}
+<div class="pw-page">
+  <h1 class="pw-page-title">Settings</h1>
+
+  {{with .Data}}
+  <div class="pw-card">
+    <p class="pw-muted">
+      {{if .Exists}}
+        Read from <span class="pw-mono">{{.Path}}</span>. Anything not in that file runs on the
+        built-in default, which is what the source column distinguishes — an effective value on its
+        own cannot say whether somebody chose it or nobody ever touched it.
+      {{else}}
+        There is no config file at <span class="pw-mono">{{.Path}}</span>, so every value below is a
+        built-in default. That is a normal way to run, not a missing file.
+      {{end}}
+    </p>
+    <p class="pw-muted pw-dim">
+      Data directory <span class="pw-mono">{{.DataDir}}</span>.
+    </p>
+  </div>
+
+  {{range .Sections}}
+  <div class="pw-card">
+    <div class="pw-section-title">{{.Title}}</div>
+    {{if .Note}}<p class="pw-muted">{{.Note}}</p>{{end}}
+    <table class="pw-table">
+      <thead>
+        <tr><th>setting</th><th>value</th><th>source</th><th>takes effect</th></tr>
+      </thead>
+      <tbody>
+        {{range .Settings}}
+        <tr>
+          <td class="pw-mono pw-wrap">
+            {{.Key}}
+            <div class="pw-muted pw-setting-note">{{.Note}}</div>
+          </td>
+          <td class="pw-mono pw-wrap">{{.Value}}</td>
+          {{/* The two sources are styled apart because that is the column
+               people came for. A default and a deliberate choice look the same
+               otherwise, and only one of them is worth arguing with. */}}
+          <td><span class="pw-source pw-source-{{if .FromFile}}file{{else}}default{{end}}">{{.Source}}</span></td>
+          <td class="pw-dim">{{.Effect}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+
+  <div class="pw-notes">
+    <p class="pw-muted">
+      This page does not write. The agent's dashboard has no login of its own — it is safe on
+      loopback because it cannot change how this machine is protected, and a form here that could
+      edit <span class="pw-mono">bind</span> would turn "anything running on this box" into
+      "anything on the network". Edit the file and restart the agent.
+    </p>
+    <p class="pw-muted">
+      Values marked <span class="pw-mono">restart</span> are claimed once when the process starts,
+      so the file and the running process can disagree until it is restarted. Everything else is
+      read as it is used.
+    </p>
+  </div>
+  {{end}}
+</div>
+{{end}}
