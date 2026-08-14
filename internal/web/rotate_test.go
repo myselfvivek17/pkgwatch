@@ -74,6 +74,38 @@ func TestTheChecklistRendersEveryCredential(t *testing.T) {
 	}
 }
 
+// The checklist is grouped under its category headings, worst blast radius
+// first.
+//
+// The order alone does not survive being read: a flat list sorted by an
+// invisible rank looks arbitrary, and the headings are what tell someone
+// working down it under pressure that stopping halfway still means the cloud
+// keys are done.
+func TestTheChecklistIsGroupedByBlastRadius(t *testing.T) {
+	_, h := rotationServer(t, nil)
+	body := get(t, h, "/rotate").Body.String()
+
+	var seen []string
+	for _, category := range []string{rotate.CategoryCloud, rotate.CategoryVCS, rotate.CategorySSH} {
+		at := strings.Index(body, `class="pw-cred-group">`+category)
+		if at < 0 {
+			t.Errorf("no heading for %q", category)
+			continue
+		}
+		seen = append(seen, category)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("found %d of 3 category headings", len(seen))
+	}
+	// Cloud reaches every other system; ssh reaches the hosts that trust it.
+	// Rendering them the other way round inverts the advice.
+	cloud := strings.Index(body, `class="pw-cred-group">`+rotate.CategoryCloud)
+	ssh := strings.Index(body, `class="pw-cred-group">`+rotate.CategorySSH)
+	if cloud > ssh {
+		t.Error("ssh is listed above cloud keys — the ordering is the advice")
+	}
+}
+
 // A tick on something this machine does not have would record work nobody
 // could have done, so the item is checked against the detected list.
 func TestAnUnknownChecklistItemIsRefused(t *testing.T) {

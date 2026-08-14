@@ -11,6 +11,11 @@
 */}}
 {{define "machine-card"}}
 <div class="pw-machine{{if not .Reporting}} is-offline{{end}}{{if .Pending}} is-pending{{end}}{{if .Revoked}} is-revoked{{end}}">
+  {{/* The stripe finds the bad machine in a grid at a glance; the badges below
+       are the same size on every card, so without it that means reading all of
+       them. Never on a card that is not reporting — an alarm drawn from
+       yesterday's numbers is the lie the offline treatment exists to stop. */}}
+  {{if .HasCritical}}<div class="pw-machine-topbar"></div>{{end}}
   <div class="pw-machine-head">
     <span class="pw-machine-name">{{.Device.Hostname}}</span>
     {{if .Reporting}}

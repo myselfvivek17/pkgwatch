@@ -1,12 +1,14 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/myselfvivek17/pkgwatch/internal/match"
 	"github.com/myselfvivek17/pkgwatch/internal/repo"
 )
 
@@ -57,6 +59,19 @@ func (m Machine) Silence() string {
 	return humanDuration(m.Now.Sub(m.Device.LastSeen))
 }
 
+// HasCritical decides the card's top stripe.
+//
+// The design puts a pulsing red bar across the top of a card carrying a
+// critical, and it earns its place: the badges below it are the same size on
+// every card, so scanning a grid of ten for the bad one means reading ten. The
+// stripe is the only thing that finds it at a glance.
+//
+// Only a reporting machine can have one. A card with no current data must not
+// gain an alarm from numbers it sent yesterday.
+func (m Machine) HasCritical() bool {
+	return m.Reporting() && m.Findings[match.TierCritical] > 0
+}
+
 // FindingTiers are the badge inputs, worst first.
 func (m Machine) FindingTiers() []Badge {
 	out := make([]Badge, 0, len(repo.Tiers))
@@ -103,6 +118,36 @@ type FleetData struct {
 	// Critical counts machines with at least one critical finding, among those
 	// actually reporting. It drives the banner.
 	Critical int
+}
+
+// LastCheck is how recently the freshest machine reported.
+//
+// The design's summary bar carries a clock, and it is the line that tells you
+// whether to believe the rest of the bar at all: "All clear" is worth something
+// if the newest report is a minute old and worth nothing if it is a week old.
+// Taken from the most recent machine rather than an average, because one
+// machine still reporting is what makes the hub itself demonstrably alive.
+func (f FleetData) LastCheck() string {
+	var newest time.Time
+	for _, m := range f.Machines {
+		if m.Device.LastSeen.After(newest) {
+			newest = m.Device.LastSeen
+		}
+	}
+	if newest.IsZero() {
+		return "never"
+	}
+
+	switch d := f.Now.Sub(newest); {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%d hours ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%d days ago", int(d.Hours()/24))
+	}
 }
 
 // State is the summary word, derived rather than stored.

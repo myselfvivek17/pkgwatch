@@ -442,6 +442,9 @@ input, button, select, textarea { font: inherit; }
 .pw-fleet-line { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .pw-fleet-state { font-weight: 650; font-size: 15px; letter-spacing: -0.01em; }
 .pw-fleet-counts { font-size: 12.5px; color: var(--text-dim); }
+/* Pushed to the far end: it qualifies the whole bar rather than belonging to
+   the counts beside it. */
+.pw-fleet-clock { margin-left: auto; font-size: 11.5px; color: var(--text-faint); }
 .pw-fleet-detail {
   display: flex; gap: 16px; flex-wrap: wrap; align-items: baseline;
   margin-top: 9px; padding-top: 9px;
@@ -471,9 +474,18 @@ input, button, select, textarea { font: inherit; }
   grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
 }
 .pw-machine {
+  position: relative; overflow: hidden;
   border: 1px solid var(--border); border-radius: 7px;
   background: var(--bg-elevated); padding: 15px 17px;
   animation: pw-fade-in 0.2s ease-out;
+}
+
+/* The critical stripe. Pulsing, because a static red line is one more colour
+   on a page that already has several and this one is meant to be found. */
+.pw-machine-topbar {
+  position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--sev-critical-bg);
+  animation: pw-pulse 3s ease-in-out infinite;
 }
 .pw-machine-head {
   display: flex; align-items: baseline; justify-content: space-between;
@@ -625,6 +637,14 @@ input, button, select, textarea { font: inherit; }
    nothing on the hub that could write the state back to the machine. */
 .pw-check-box.is-static { cursor: default; border-style: dashed; }
 .pw-check-box.is-static:hover { border-color: var(--border-strong); }
+
+/* Category heading over each block of the checklist. Small and quiet: it
+   orders the work, it is not itself the work. */
+.pw-cred-group {
+  margin-top: 16px; font-size: 10.5px; font-weight: 650;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-faint);
+}
+.pw-cred-group:first-of-type { margin-top: 10px; }
 
 .pw-check-body { min-width: 0; display: grid; gap: 2px; }
 

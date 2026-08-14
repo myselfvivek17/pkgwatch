@@ -28,12 +28,20 @@
       <span class="pw-fleet-counts">
         {{.Reporting}} reporting{{if .Unreporting}} · <strong>{{.Unreporting}} not reporting</strong>{{end}}{{if .Waiting}} · {{.Waiting}} waiting for approval{{end}}
       </span>
+      {{/* The clock is what says whether to believe the word to its left.
+           "All clear" means something when the newest report is a minute old
+           and nothing when it is a week old. */}}
+      <span class="pw-fleet-clock">last check {{.LastCheck}}</span>
     </div>
     {{if .Critical}}
+    {{/* Both of the design's actions, and both real now. This was a live link
+         beside a disabled stub reading "lands in M6" long after M6 landed —
+         a page describing the tool's own state has to keep up with it. */}}
     <div class="pw-fleet-detail">
       <span>{{.Critical}} machine{{if ne .Critical 1}}s{{end}} with critical findings.</span>
       <a href="/findings?tier=critical">View findings</a>
-      <span class="pw-fleet-action is-disabled" title="Not built yet, lands in M6">Start credential rotation</span>
+      <a href="/sessions">View block report</a>
+      <a href="/rotate">Start credential rotation</a>
     </div>
     {{end}}
   </div>

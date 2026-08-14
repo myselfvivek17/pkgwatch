@@ -58,6 +58,15 @@ type Exposure struct {
 	// the urgency.
 	Window string
 
+	// Groups is the checklist under its category headings, worst blast radius
+	// first. Grouped rather than flat because the headings are the reason the
+	// order is what it is — a flat list sorted by an invisible rank looks
+	// arbitrary, and someone working down it under pressure needs to know that
+	// stopping halfway still means the cloud keys are done.
+	Groups []RotateGroup
+
+	// Items is the same rows ungrouped, for anything counting rather than
+	// rendering.
 	Items   []RotateRow
 	Done    int
 	Total   int
@@ -75,6 +84,30 @@ type Exposure struct {
 	// Zero of five and nothing-recorded are different claims, and only one of
 	// them is evidence about what the machine has done.
 	Started bool
+}
+
+// RotateGroup is one category's worth of checklist rows.
+type RotateGroup struct {
+	Label string
+	Items []RotateRow
+}
+
+// grouped splits rows into category blocks, preserving the order they arrive
+// in — which is already worst blast radius first, decided in one place by
+// rotate.Detect rather than re-sorted differently by each page that shows it.
+func grouped(rows []RotateRow) []RotateGroup {
+	var out []RotateGroup
+	at := map[string]int{}
+	for _, row := range rows {
+		i, seen := at[row.Category]
+		if !seen {
+			out = append(out, RotateGroup{Label: row.Category})
+			i = len(out) - 1
+			at[row.Category] = i
+		}
+		out[i].Items = append(out[i].Items, row)
+	}
+	return out
 }
 
 // RotateRow is one credential in one exposure's checklist.
@@ -122,6 +155,7 @@ func (s *Server) handleRotate(w http.ResponseWriter, r *http.Request) {
 		if exposure.Total > 0 {
 			exposure.Percent = exposure.Done * 100 / exposure.Total
 		}
+		exposure.Groups = grouped(exposure.Items)
 		data.Exposures = append(data.Exposures, exposure)
 	}
 
@@ -175,9 +209,12 @@ func (s *Server) handleFleetRotate(w http.ResponseWriter, r *http.Request) {
 		}
 		exposure.Total = len(exposure.Items)
 		exposure.Started = exposure.Total > 0
+		exposure.Total = len(exposure.Items)
+		exposure.Started = exposure.Total > 0
 		if exposure.Total > 0 {
 			exposure.Percent = exposure.Done * 100 / exposure.Total
 		}
+		exposure.Groups = grouped(exposure.Items)
 		data.Exposures = append(data.Exposures, exposure)
 	}
 

@@ -81,7 +81,12 @@
         </div>
       </div>
 
-      {{if .Items}}
+      {{if .Groups}}
+      {{/* Grouped under category headings, worst blast radius first. A flat
+           list in the same order looks arbitrary; the headings are what say
+           that stopping halfway still means the cloud keys are done. */}}
+      {{range $exposure.Groups}}
+      <div class="pw-cred-group">{{.Label}}</div>
       <ul class="pw-checklist">
         {{range .Items}}
         <li class="pw-check{{if .Checked}} is-done{{end}}">
@@ -117,6 +122,7 @@
         </li>
         {{end}}
       </ul>
+      {{end}}
       {{else if $.Data.ReadOnly}}
       <p class="pw-muted">
         Nothing recorded for this machine yet. The checklist is built from the credential files that

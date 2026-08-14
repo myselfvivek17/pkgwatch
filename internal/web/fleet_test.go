@@ -73,6 +73,32 @@ func TestASilentMachineShowsNoFindingCounts(t *testing.T) {
 	}
 }
 
+// The critical stripe marks the card carrying a critical, and never marks one
+// that has stopped reporting.
+//
+// The badges are the same size on every card, so finding the bad machine in a
+// grid of ten otherwise means reading ten. The second half matters more: an
+// alarm drawn from numbers a silent machine sent yesterday is the same lie the
+// offline treatment exists to stop, arriving by a different route.
+func TestOnlyAReportingCriticalMachineGetsTheStripe(t *testing.T) {
+	now := time.Now()
+	live := device("AAAA-0001", "tower", repo.DeviceStatusApproved, now.Add(-time.Minute))
+	silent := device("BBBB-0002", "nas", repo.DeviceStatusApproved, now.Add(-3*24*time.Hour))
+
+	body := fleetPage(t, []repo.Device{live, silent}, map[string]map[string]int{
+		"AAAA-0001": {"critical": 1},
+		"BBBB-0002": {"critical": 4},
+	})
+
+	if got := strings.Count(body, "pw-machine-topbar"); got != 1 {
+		t.Errorf("found %d critical stripes, want exactly the reporting machine's", got)
+	}
+	// And the bar says how fresh any of this is.
+	if !strings.Contains(body, "last check") {
+		t.Error("the summary bar does not say how recently anything reported")
+	}
+}
+
 // Three states, not two. An approved machine that has never sent anything is a
 // different problem from one that stopped, and the naive COALESCE(last_seen,
 // now) renders it as online — the exact lie this page exists to prevent.
