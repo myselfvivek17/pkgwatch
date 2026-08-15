@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -130,11 +131,70 @@ func TestTheExecutableBitIsPartOfTheDigest(t *testing.T) {
 // An archive is a file on disk in a directory a person can reach. An extractor
 // that trusts its entries is how a tarball writes outside the directory it was
 // asked to fill.
+//
+// The assertion is containment, not refusal, because those are the same thing
+// only on Windows. A backslash is a path separator there and an ordinary
+// filename character on Unix, so `..\escape.txt` is a traversal on one platform
+// and a legally-named file on the other — and safeJoin is right to accept it on
+// Unix, where it lands inside the directory. Asserting the refusal instead is
+// what made this pass on Windows and fail in Linux CI.
+//
+// Refusing backslashes everywhere would square that, and would also break the
+// promise restore exists for: Pack would archive a Unix file named `foo\bar`
+// that restore then would not put back.
 func TestAnArchiveCannotWriteOutsideTheRestoreDirectory(t *testing.T) {
-	for _, name := range []string{"../escape.txt", "/etc/passwd", `..\escape.txt`} {
-		if _, err := safeJoin(t.TempDir(), name); err == nil {
-			t.Errorf("entry %q was accepted", name)
+	hostile := []string{
+		"../escape.txt",
+		"../../../../etc/passwd",
+		"/etc/passwd",
+		"sub/../../escape.txt",
+		`..\escape.txt`,
+		`..\..\escape.txt`,
+		`C:\Windows\system32\drivers\etc\hosts`,
+		"",
+		".",
+		"..",
+	}
+
+	for _, name := range hostile {
+		dir := t.TempDir()
+		got, err := safeJoin(dir, name)
+		if err != nil {
+			continue // refused outright, which is always an acceptable answer
 		}
+
+		// Accepted, so it must be inside the directory. Resolved on both sides
+		// because a temp dir can be a symlink (/var on macOS), and comparing an
+		// unresolved prefix would call a contained path an escape.
+		realDir, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rel, err := filepath.Rel(realDir, got)
+		if err != nil {
+			t.Errorf("entry %q was accepted as %q, which is not under %q", name, got, realDir)
+			continue
+		}
+		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			t.Errorf("entry %q escaped: %q is outside %q", name, got, realDir)
+		}
+	}
+}
+
+// The separator-specific half, where the platform decides the answer.
+func TestBackslashIsATraversalOnlyOnWindows(t *testing.T) {
+	_, err := safeJoin(t.TempDir(), `..\escape.txt`)
+
+	if runtime.GOOS == "windows" {
+		if err == nil {
+			t.Error(`..\escape.txt was accepted on Windows, where \ is a path separator`)
+		}
+		return
+	}
+	if err != nil {
+		t.Errorf(`..\escape.txt was refused on %s, where \ is an ordinary filename `+
+			`character — Pack can produce that name, so restore has to accept it: %v`,
+			runtime.GOOS, err)
 	}
 }
 
