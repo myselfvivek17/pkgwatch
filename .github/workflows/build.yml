@@ -13,7 +13,19 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Run on all three, not just Linux. The build matrix below cross-compiles
+    # six targets, and cross-compiling never executes a test — so for a long
+    # while the suite only ever RAN on Linux, and a test asserting Windows path
+    # semantics passed locally and failed here. The reverse blind spot is the
+    # same size: a Unix-only assumption would pass CI and break on a laptop.
+    #
+    # Path separators, case-insensitive filesystems, file locking and line
+    # endings all differ, and this tool walks filesystems for a living.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -29,7 +41,11 @@ jobs:
       - run: go build ./...
       - run: go vet ./...
       - run: go test ./...
+      # Once, on Linux. Formatting does not vary by platform, and the shell
+      # here is sh — the Windows runner would need its own spelling of it for
+      # no extra signal.
       - name: gofmt
+        if: matrix.os == 'ubuntu-latest'
         run: |
           unformatted=$(gofmt -l .)
           if [ -n "$unformatted" ]; then
