@@ -156,29 +156,30 @@ func TestAnArchiveCannotWriteOutsideTheRestoreDirectory(t *testing.T) {
 		"..",
 	}
 
+	dir := t.TempDir()
 	for _, name := range hostile {
-		dir := t.TempDir()
 		got, err := safeJoin(dir, name)
 		if err != nil {
 			continue // refused outright, which is always an acceptable answer
 		}
-
-		// Accepted, so it must be inside the directory. Resolved on both sides
-		// because a temp dir can be a symlink (/var on macOS), and comparing an
-		// unresolved prefix would call a contained path an escape.
-		realDir, err := filepath.EvalSymlinks(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		rel, err := filepath.Rel(realDir, got)
-		if err != nil {
-			t.Errorf("entry %q was accepted as %q, which is not under %q", name, got, realDir)
-			continue
-		}
-		if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-			t.Errorf("entry %q escaped: %q is outside %q", name, got, realDir)
+		if !within(dir, got) {
+			t.Errorf("entry %q escaped: %q is outside %q", name, got, dir)
 		}
 	}
+}
+
+// within reports whether path is dir or sits under it, as strings.
+//
+// No EvalSymlinks on either side. safeJoin never touches the disk, so a test
+// that resolved paths would be checking something it does not do — and
+// resolving only ONE side is worse than resolving neither: macOS reports a temp
+// dir under /var and resolves it to /private/var, Windows hands back an 8.3
+// short name like RUNNER~1 and resolves it to runneradmin. Both turned an
+// identical path into a false escape, which is exactly what the first version
+// of this test did on two platforms at once.
+func within(dir, path string) bool {
+	dir, path = filepath.Clean(dir), filepath.Clean(path)
+	return path == dir || strings.HasPrefix(path, dir+string(os.PathSeparator))
 }
 
 // The separator-specific half, where the platform decides the answer.
