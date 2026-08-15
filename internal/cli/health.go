@@ -208,9 +208,11 @@ func healthTargets(cfg config.Config) []target {
 // reachable turns a bind address into one that can be connected to.
 //
 // A daemon bound to a specific LAN address is not on loopback, and asking
-// 127.0.0.1 gets connection-refused from a process that is serving perfectly —
-// this machine's hub binds 192.168.0.198 and was reported dead by exactly that
-// mistake. The wildcards are the only ones that need translating.
+// 127.0.0.1 gets connection-refused from a process that is serving perfectly.
+// That is not hypothetical: the first version of this command hardcoded
+// loopback and reported a hub that had been serving all day as dead, because
+// the hub was bound to one LAN address. The wildcards are the only ones that
+// need translating.
 func reachable(bind string) string {
 	switch bind {
 	case "", "0.0.0.0", "::", "[::]":

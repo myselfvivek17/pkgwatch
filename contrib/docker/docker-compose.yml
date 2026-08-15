@@ -34,12 +34,15 @@ services:
       - pkgwatch-hub-data:/data
       - ./pkgwatch.toml:/data/.local/share/pkgwatch/pkgwatch.toml:ro
 
-    # Published on the LAN address rather than 0.0.0.0. On a machine running
+    # Published on one LAN address rather than 0.0.0.0. On a machine running
     # Docker, 0.0.0.0 also means every container bridge and any VPN interface,
     # which is a wider audience than "my network" and not one anybody pictures.
-    # Change the address to this host's.
+    #
+    # 192.0.2.10 is a documentation address (RFC 5737) and will not work:
+    # replace it with this host's own LAN address, deliberately, so nobody
+    # publishes a fleet dashboard on an interface they did not think about.
     ports:
-      - "192.168.0.198:4876:4876"
+      - "192.0.2.10:4876:4876"
 
     # Nothing in the hub needs to write outside its volume or gain privileges.
     read_only: true

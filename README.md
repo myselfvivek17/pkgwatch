@@ -1,299 +1,185 @@
 # pkgwatch
 
-A cross-platform supply-chain watchdog for a small fleet of personal machines, shipped as a single static binary that runs in one of two modes.
+A supply-chain watchdog for a small fleet of personal machines. One static Go binary, no agent-side services to host, no account to create, and nothing about your machines leaves your network.
 
-**Agent** — runs a local registry proxy that gates `npm` and `pip` installs, keeps an inventory of everything installed on the machine, matches it against a local advisory database, and serves a machine-local dashboard. Fully functional with no network.
+It does two things that are usually sold separately:
 
-**Hub** — aggregates events and findings from paired agents, serves the fleet dashboard, and relays signed advisory bundles. Never required for an agent to work.
-
-One machine can run both.
-
-## The three hard rules
-
-1. **The agent never depends on the hub.** Hub down, hub unreachable, hub never configured — installs still get gated, findings still get detected.
-2. **Advisory bundles are verified against a publisher key compiled into the binary**, not trusted because the hub sent them. A compromised hub must not be able to push "everything is safe" and blind the fleet.
-3. **Policy flows in the strict direction only.** An agent may be configured stricter than the hub tells it, never looser. Loosening is a local action.
-
-## Status
-
-**M0 through M2 complete.** Installs are gated. Nothing is scanned yet — pkgwatch does not know what is already on the machine until M3.
-
-| Milestone | State |
-|---|---|
-| M0 — skeleton, config, DB, CLI, `/health`, CI | done |
-| M0.5 — design system, dashboard shell | done |
-| M1 — advisory bundle pipeline, PEP 440 + semver matching, `check` | done |
-| M1b — Debian, Alpine, Go, Rust matching | done |
-| M1b — Ubuntu matching | comparator done, **feed not in the bundle** |
-| M1b — Java, Ruby, PHP, .NET matching | remaining |
-| M2 — npm and PyPI gates | done |
-| M3 — inventory, Docker collector, retroactive watcher | |
-| M4 — agent dashboard pages | |
-| M5 — hub, pairing, sync | |
-| M6 — quarantine, credential rotation, packaging | |
-
-Commands whose milestone has not landed exist and say so rather than being absent:
+- **Stops a bad install as it happens.** A local registry proxy sits in front of `npm` and `pip`. Known-malicious and known-vulnerable versions are removed from the version listing before your package manager ever sees them, so the resolver quietly picks something safe. Nothing to approve, nothing to read.
+- **Finds the one you already installed.** The package you added six months ago that became known-bad this morning is found by a scan nobody triggered, matched against an advisory database that updates itself.
 
 ```
-$ pkgwatch scan
-Error: not implemented yet — lands in M3
-```
-
-## Checking a package
-
-```
-$ pkgwatch check pkg:npm/lodash@4.17.20
-npm lodash (4.17.20)
-bundle 20260808 · 5 records · 1 advisories on file for this package
-
-HIGH  GHSA-35jh-r3h4-6jhm  score 7.2
-      Command Injection in lodash
-      fixed in 4.17.21
-
 $ pkgwatch check "pkg:npm/%40ctrl/tinycolor@4.1.2"
 CRITICAL · MALWARE  MAL-2025-47141  score 20.0
                     Malicious code in @ctrl/tinycolor (npm)
                     remove this package — malicious releases are not fixed by upgrading
 ```
 
-Malware is floored at critical regardless of its CVSS score. Active malware and a latent CVE are different products and do not share a scale.
+**No AI, no telemetry, no cloud.** Matching is deterministic version-range comparison against a signed SQLite database you hold. The only network traffic is to the package registries it proxies and, optionally, to your own hub.
 
-## Gating an install
+---
 
-```sh
-pkgwatch npm install express        # or: pkgwatch npm ci
-pkgwatch pip install -r requirements.txt
-eval "$(pkgwatch shell-init bash)"  # shadow npm and pip permanently
-```
+## Agent and hub
 
-The wrapper starts a filtering proxy on a loopback port for the lifetime of one
-command. Nothing is written to your `.npmrc` or `pip.conf`, and the agent daemon
-does not need to be running.
+The binary runs in one of two modes. Most people only ever need the first.
 
-**npm is intercepted at two points, because either one alone leaves a hole.**
+**Agent** — runs on a machine you use. It gates `npm` and `pip` installs, inventories what is installed, matches that against the advisory database, and serves a dashboard on `127.0.0.1`. **Fully functional with no network and no hub.** If you have one laptop, this is the whole product.
 
-Filtering the *packument* (`GET /{name}`) removes affected versions before the
-resolver ever sees them, so a clean install shows no sign anything happened —
-`npm install lodash express` pulls 68 packages, withholds 350 affected versions
-across 9 of them, and resolves to clean releases. That is the invisible happy
-path, and it is where the gate does almost all of its work.
+**Hub** — runs on one machine and aggregates findings from paired agents, so you can answer "which of my machines has this package" from one page. It also relays advisory bundles, so one machine downloads the corpus and the rest copy it across the LAN instead of each fetching hundreds of megabytes.
 
-Refusing the *tarball* (`GET /{name}/-/*.tgz`) catches the other half. `npm ci`
-reads exact versions and download URLs straight out of `package-lock.json` and
-never requests a packument at all; filtering alone would miss it completely.
-Packument tarball links are rewritten back through the proxy so this point
-actually fires.
+One machine can run both. **The hub is a convenience and never a dependency:** kill it and every agent keeps gating, scanning and matching exactly as before.
 
-**PyPI has one interception point, and that is not an oversight.** pip only ever
-learns a file exists from the index page, including when a requirements file
-pins the version — so removing a file from the listing removes it from every
-resolution path pip has. `pip install <url>` and a local wheel touch no index
-and nothing a proxy can do reaches them.
+### The three hard rules
 
-**Withholding a version and blocking a download are different events.** The
-first is routine and silent — the resolver picks another. The second stopped
-something. They are reported separately, and withheld versions only surface when
-resolution actually failed, which is what makes the npm error legible:
+1. **The agent never depends on the hub.** Hub down, unreachable, or never configured — installs still get gated and findings still get detected.
+2. **Advisory bundles are verified against a publisher key compiled into the binary**, not trusted because the hub sent them. A compromised hub cannot push "everything is safe" and blind the fleet.
+3. **Policy flows in the strict direction only.** A hub may tell an agent to be stricter, never looser. Loosening is always a local action.
 
-```
-$ pkgwatch npm install lodash@4.17.20
-npm error notarget No matching version found for lodash@4.17.20.
+---
 
-pkgwatch withheld 115 affected version(s) from resolution:
+## Install
 
-  PACKAGE         WITHHELD  ADVISORIES
-  pkg:npm/lodash  115       GHSA-jf85-cpcp-j695, GHSA-r5fr-rjxr-66jc
+No published releases yet, so you build it or point the installer at a binary you built. The installers download nothing: a supply-chain tool whose install script piped an unsigned build from the internet would be a poor advertisement for itself.
 
-  If the version you asked for could not be found, this is why.
-```
-
-**The gate never prompts.** It answers HTTP requests from tools with no terminal
-attached, so blocking is a 403 and a recorded decision. The wrapper reads those
-decisions after the package manager exits — when stdin is ours again — and does
-the asking. Overrides are named individually and apply to that one install
-session; withheld versions are approved per package, since there is no way to
-know which of a hundred filtered versions the resolver would have picked.
-
-**It fails open, loudly.** A locked database, a missing bundle, an unparseable
-packument or a panic in a comparator allows the install and writes a
-`gate_degraded` event. A gate that is silently not gating reads as protection and
-is worse than no gate at all.
-
-### The publish buffer
-
-Everything above depends on someone already knowing a package is bad. Advisories
-postdate the attacks they describe, so a compromised release is
-indistinguishable from a good one for its first hours — which is exactly when it
-gets installed. The buffer is the only defence here that needs no knowledge at
-all: **wait.**
-
-A version published more recently than `cooldown_hours` (default **72**) is
-withheld from resolution, so the resolver settles on the previous one. Nothing
-fails, nothing prompts:
-
-```
-$ pkgwatch npm install chalk
-added 1 package in 1s
-
-pkgwatch withheld 3 version(s) across 1 package(s) (3 too new to trust yet);
-resolution found others.
-```
-
-Two rules keep it safe to leave switched on:
-
-**The buffer never leaves you with nothing.** A security patch is also a brand
-new release — holding it back would strand the resolver on the version it fixes,
-which the gate then withholds as vulnerable, so nothing survives and the install
-fails. So the buffer only applies when something older and unflagged remains.
-A brand new package, or one whose every release is recent, installs normally.
-That rule needs the whole version list at once, which is why the gate evaluates a
-package's versions as a set rather than one at a time.
-
-**The buffer belongs to resolution, not download.** A lockfile pinning a fresh
-version passes through — it is a record of a decision already made, and refusing
-it would break `npm ci` and every CI job that depends on it.
-
-Two limits worth knowing: a semver range that only fresh versions satisfy
-(`chalk@^6` when all of 6.x is inside the buffer) fails rather than falling back,
-because no older version matches what you asked for. And the buffer needs publish
-times, which the PEP 503 HTML index does not carry — pip's PEP 691 JSON index
-does, and pkgwatch logs a warning rather than skipping the check silently when it
-meets the old format.
-
-`block_tier` defaults to `high`. npm's corpus has a low or medium advisory
-against a large share of transitive dependencies, and a gate that fires on all of
-them gets switched off within a week. Malware always blocks regardless of the
-setting — it is an active attack, not a latent weakness, and the two do not share
-a scale.
-
-Gate evaluation costs **2.3 ms on average and 37 ms at worst** across 3,310 real
-decisions. `Authorization` headers travel to the upstream registry verbatim and
-are never logged, inspected or persisted; a test asserts the token does not reach
-log output.
-
-## The advisory bundle
-
-Advisories are compiled centrally and distributed as one signed SQLite file, replicated to every agent. Compiling once and shipping a file beats every machine parsing hundreds of megabytes of upstream JSON.
+**Linux / macOS**
 
 ```sh
-pkgwatch publish build-bundle --input npm-all.zip --out advisories.db --key publisher.key
-pkgwatch sync --file advisories.db
+git clone https://github.com/myselfvivek17/pkgwatch && cd pkgwatch
+sh contrib/install.sh              # agent + service, verified by /health
+sh contrib/install.sh --hub        # a hub as well
+sh contrib/install.sh --no-service # binary only
 ```
 
-The whole npm ecosystem — 228,957 advisories from a 208 MB OSV archive — compiles in about 13 seconds into a **49 MB** bundle. That is well above the 15–25 MB the design anticipated, and the reason is worth stating: **219,308 of the 227,080 rows are malware records**, not vulnerabilities. The `ossf/malicious-packages` feed has grown by more than an order of magnitude, which is itself the argument for this tool existing.
+**Windows**
 
-Adding PyPI, Debian, Alpine, Go and crates.io brings it to 522,525 records and **117 MB**, down from 313 MB by two changes that lose nothing:
-
-- **Enumerated versions are dropped when the advisory also gives ranges.** Debian enumerates every affected version across four releases; the range already says the same thing. That alone was 7 million rows and 160 MB. Malware records keep their enumeration even when a range exists — a range spanning a non-contiguous set would mark clean versions in the gap as malicious, and "this package is malware" must never be reached by inference.
-- **Summaries are stored once per advisory id**, not once per affected package. One CVE lands in four Debian releases with identical prose averaging ~245 characters.
-
-117 MB is still more than a fleet-wide bundle should be, and per-ecosystem bundles are the obvious next step — an agent with no Debian packages has no use for 200,000 Debian rows. That is no longer only an optimisation: **Ubuntu is missing because it cannot fit.** Its OSV archive alone is 573 MB of input, several times Debian's, and there is no room for it in a file every agent downloads whole. Ubuntu coverage is blocked on this decision.
-
-**When per-ecosystem bundles land, the ecosystem has to go into the signed message**, or a validly signed npm bundle served as `advisories-debian.db` silently zeroes Debian coverage — signature intact, agent blind.
-
-The split is deliberately deferred until M3's inventory exists and its detection has been measured on real machines: an oversized bundle is a bandwidth problem, a wrongly-scoped one is a security problem. Measurements, conditions and the safety properties any implementation must have are in [`docs/per-ecosystem-bundles.md`](docs/per-ecosystem-bundles.md) — including the finding that the split unit is **ecosystem plus release**, not ecosystem. Debian ships 13 releases in the bundle at ~24% of its records apiece, and splitting at release level takes the home server from 57 MB to 24.6 MB, a bigger saving than the ecosystem split before it.
-
-### A bundle says what it covers
-
-Every bundle records the ecosystems it carries, and the agent refuses to answer
-questions about the ones it does not:
-
-```
-$ pkgwatch status
-advisories  20260809 · 522525 records · built 0s ago
-covers      Alpine, Debian, Go, PyPI, crates.io, npm
+```powershell
+git clone https://github.com/myselfvivek17/pkgwatch; cd pkgwatch
+powershell -ExecutionPolicy Bypass -File contrib\windows\install.ps1
 ```
 
-This exists because of a live gap. A bundle was built with 496,740 records and no
-PyPI feed at all, so every lookup for a Python package returned zero rows — and
-zero rows is the same query result as *nothing wrong*. `check pkg:pypi/requests@2.19.1`
-answered "no advisories match this version" for a package that had ten, one of
-them a credential leak. The bundle was large, recent and correctly signed. It was
-simply blind, and nothing said so.
+Run that one **elevated** if you can: it registers the agent as a windowless scheduled task. Unelevated it falls back to an interactive task, which works but leaves a console window that stops the agent when closed — and it tells you so rather than leaving you to find out.
 
-An ecosystem absent from `covers` is now reported as unknown by the gate, refused
-outright by `check`, and warned about by `status` if it is one of the gated two.
-"We never looked" and "we looked and it was clean" must never be the same answer.
-
-A bundle is trusted because of who signed it, never because of where it came from. Verification is identical and mandatory whether the bytes came from the publisher or from your own hub, and `sync` refuses:
-
-- bytes that do not match the manifest digest
-- a signature from any key not compiled into the binary
-- a bundle relabelled to a version it was not signed for
-- a bundle older than the one already installed, without `--allow-downgrade`
-- a bundle with no signature at all
-
-The version and digest are read from the manifest, never from the candidate file — otherwise the file would get to choose what it is signed as, which is no binding at all. Publisher keys are a **list**, current plus next, so rotating one does not brick agents running an older binary.
-
-## Version matching
-
-Version comparison is where correctness actually lives — both false positives and false negatives are silent.
-
-The **PEP 440** parser is hand-written, because no Go library handles epochs (`1!2.0`), post-releases, dev releases and local versions correctly together. It is checked two ways: a hand-written table encoding what the specification says, and a differential test against CPython's own `packaging` library covering **9,634 versions** for normalization and **6,511** for total ordering. The golden file is committed, so CI needs no Python.
-
-**npm** versions go through `Masterminds/semver` in strict mode, pinned to the behaviour advisory matching depends on: a prerelease sorts below its own release, so `1.0.0-beta.1` never falls inside a range introduced at `1.0.0`.
-
-**Debian and Ubuntu** share a hand-written `deb-version(7)` comparator, checked against Debian's own `apt_pkg.version_compare` across 852 versions and 402 equality pairs. Two of its rules are unlike anything else: `~` sorts *before* the end of a string (which is how Debian spells a pre-release, so `1.0~rc1` precedes `1.0`), and letters sort before all non-letters rather than in ASCII order. The comparator is exercised against Debian data; the Ubuntu feed is not currently in the bundle, so Ubuntu packages come back as *unknown* rather than clean.
-
-**Alpine** uses a hand-written apk comparator, checked against `apk version -t` across all 1,600 pairwise comparisons of its corpus. Its quirks were read off apk itself rather than from documentation: trailing components are significant (`1.0 < 1.0.0`, the opposite of PEP 440), a component with a leading zero compares as a fraction (`1.01 < 1.1`), and an absent suffix number sorts below zero (`1.0_p < 1.0_p0`).
-
-**Distribution advisories keep their release qualifier.** A CVE lands in `Debian:11`, `Debian:12`, `Debian:13` and `Debian:14` with a *different fixed version in each*, so collapsing them would match against the wrong distribution's bounds. `check` requires the release:
-
-```sh
-pkgwatch check "pkg:deb/debian/openssl@3.0.11-1~deb12u2?distro=debian-12"
-```
-
-Verified against a live `debian:12-slim` container: all 88 of its real installed packages parsed without error, 8 flagged with findings consistent with Debian's tracker, and the fix boundary holds — `3.0.11-1~deb12u2` is flagged for a CVE that `3.0.19-1~deb12u2` is clean for.
-
-CVSS base scores are computed from the vector strings OSV publishes, falling back to the qualitative rating when no vector is present.
-
-## Build
-
-Requires the Go version in `go.mod` (currently 1.25, raised by `golang.org/x/sys`, not by anything here). Everything builds with `CGO_ENABLED=0` — that is what keeps cross-compiling all six targets from one machine trivial, and it is why the SQLite driver is `modernc.org/sqlite` rather than `mattn/go-sqlite3`.
+**Build it yourself**
 
 ```sh
 CGO_ENABLED=0 go build -o dist/pkgwatch ./cmd/pkgwatch
 go test ./...
 ```
 
-## Try it
+Everything builds with `CGO_ENABLED=0`, which is what makes cross-compiling all six targets from one machine trivial, and why the SQLite driver is `modernc.org/sqlite`.
+
+On Windows, unsigned binaries trip SmartScreen and may be flagged by Defender. On macOS they need `xattr -d com.apple.quarantine`.
+
+---
+
+## Quick start
 
 ```sh
-pkgwatch status          # health, feed freshness, coverage, findings, pairing
-pkgwatch agent           # dashboard on :4875, npm gate on :4873, PyPI on :4874
-pkgwatch npm ci          # one gated install, no daemon needed
+pkgwatch sync --dir ./bundles   # install advisory bundles (see below)
+pkgwatch scan                   # take the first inventory
+pkgwatch findings               # what is wrong, worst first
+pkgwatch agent                  # daemon: gates, scheduled scans, dashboard
 ```
 
-Then open `/design` for the full design system — every token and component the dashboards are built from, in both themes.
+Then open **http://127.0.0.1:4875**.
 
-The hub refuses to start on a non-loopback bind without a configured password. That is deliberate: the dashboard approves package installs and deletes files, so unauthenticated on a LAN it is a remote code execution primitive. Tailscale is the recommended exposure path.
+To gate installs in your shell:
 
-Both modes serve `/health` for the service manager to watch.
+```sh
+eval "$(pkgwatch shell-init)"    # npm and pip now go through the gate
+```
 
-## Dependency discipline
+or gate a single command without any daemon:
 
-This tool watches for supply-chain attacks. Its own dependency tree is a target, so direct dependencies are capped at 8 and `govulncheck` runs in CI.
+```sh
+pkgwatch npm ci
+pkgwatch pip install -r requirements.txt
+```
 
-Currently in use: `modernc.org/sqlite`, `go-chi/chi/v5`, `spf13/cobra`, `BurntSushi/toml`, `Masterminds/semver/v3`, `package-url/packageurl-go`. Reserved: `golang.org/x/crypto` for argon2id (M5) and `fyne.io/systray` behind the `tray` build tag (M6). That accounts for all 8 — anything else has to be stdlib or hand-written, which is why the PEP 440 parser, the CVSS calculator and the OSV reader are in-tree.
+**Full walkthrough, including pairing and the hub: [docs/USAGE.md](docs/USAGE.md).**
 
-**On vendoring:** the build spec calls for committing `vendor/`. We don't. `go mod vendor` weighs 134 MB, 125 MB of which is machine-generated `modernc.org/{libc,sqlite}` — one file set per GOOS/GOARCH, the cost of pure-Go SQLite. `go.sum` already pins every dependency by cryptographic hash, so tampering is covered; what we forgo is availability if a module is yanked upstream. Worth revisiting if pkgwatch moves to its own repository.
+---
 
-The dashboards ship **zero JavaScript dependencies**. Server-rendered `html/template`, hand-written CSS, and about forty lines of vanilla JS. A supply-chain security tool that pulled four hundred npm packages to render a table would be a self-own.
+## What it does
 
-## Ports
+### Gating an install
+
+The npm gate has two interception points, because one is not enough:
+
+- **The packument** (`GET /{name}`) is the resolution path. Affected versions are removed from the listing and any dist-tag pointing at one is repointed, so npm's own resolver settles on a safe version. This is the invisible happy path — no prompt, no failure.
+- **The tarball** (`GET /{name}/-/*.tgz`) is the download path. A lockfile-pinned install never asks for a listing, so filtering alone would miss it entirely. That one is refused outright, with a readable report.
+
+The gate **fails open**. A locked database, a stale bundle or a matcher panic logs `gate_degraded` and lets the install through. A security tool that bricks `npm install` gets uninstalled the same afternoon.
+
+`Authorization` headers are forwarded verbatim and never logged or persisted, with a test asserting no auth value reaches log output.
+
+### The publish buffer
+
+A version published more recently than `cooldown_hours` (default 72) is withheld from resolution, so the resolver takes the previous one.
+
+This is the only defence that needs no knowledge at all, and it covers the window nothing else can: every advisory postdates the attack it describes, so a compromised release is indistinguishable from a good one for its first hours — which is exactly when it is being installed. The buffer never applies when nothing older survives, so a brand new package and a security patch both still install.
+
+### Finding what is already installed
+
+Inventory covers npm (global and every `node_modules`), Python (`site-packages` metadata, parsed directly — never by invoking each interpreter), lockfiles for Go, Rust, Ruby, PHP and .NET, the host's own distribution packages, and **every running Docker container** — read over the Docker socket, with nothing executed inside the container.
+
+Rows are never deleted when a package goes away; a retired row is timeline history. Findings close themselves when a package is removed and reopen if it comes back.
+
+**First run is a baseline.** Pre-existing low-severity findings are recorded acknowledged without notifying, because day one is otherwise hundreds of alerts about six-year-old dev dependencies and notifications get switched off in week one.
+
+### Responding
+
+- **Quarantine** — archive a package, verify the archive reads back, and only then delete the original. `restore` refuses to claim success unless every file, link and executable bit comes back byte-identical. System and container packages are refused, with an explanation of what would have been destroyed.
+- **Credential rotation** — after malware, a checklist of the credentials that **actually exist on that machine**, worst blast radius first (cloud → VCS → registry → SSH → app). Progress is stored per finding, so it survives a reboot. A generic checklist reads as a form to fill in; a short true one gets finished.
+- **Script guard** — `enable-script-guard` turns npm lifecycle scripts off for every install you run, and `allow-scripts <pkg>` permits one package by name. Install scripts are arbitrary code running as you, before any advisory has had a chance to describe them.
+
+### The dashboard
+
+Server-rendered, **zero JavaScript dependencies** — hand-written CSS and about forty lines of vanilla JS. A supply-chain tool that pulled four hundred npm packages to render a table would be a self-own.
+
+Agent pages: overview, timeline (live via SSE), findings triage, install-block reports, inventory with a retirement audit, credential rotation, quarantine, settings. Hub pages: fleet overview with trend charts, fleet timeline, findings, blocked installs, fleet inventory, package search, device pairing.
+
+Open `/design` on either for the full design system in both themes.
+
+---
+
+## Security model
+
+**What the hub can and cannot do.** It receives findings and events. It cannot make an agent trust a bundle (they are verified against the compiled-in publisher key regardless of who served them), cannot loosen an agent's policy, and cannot read a machine's package inventory unless *both* the agent's config and the hub's own record of that device say so — the hub's record is authoritative, so a compromised agent cannot start volunteering a map of its installed software.
+
+**Pairing** is deliberately not a shared secret: ed25519 keypair per device, an 8-character code with a 10-minute single-use TTL, explicit approval on the hub showing the device fingerprint, and a device token hashed with argon2id. Every request afterwards carries the token *and* an ed25519 signature over `(method|path|body-sha256|timestamp)` with 120-second skew rejection, so a leaked token alone is not enough. TLS is on by default with the certificate fingerprint pinned at pairing — a mismatch halts rather than retrying, because retrying hands credentials to whatever is answering.
+
+**The hub refuses to start** bound to a non-loopback address without a configured password. The dashboard approves installs and deletes files; unauthenticated on a LAN it is a remote code execution primitive, not a convenience.
+
+**Bundle signing.** Advisory bundles are ed25519-signed and the signature covers the scope as well as the version, so a bundle cannot be served as one it was not signed to be. The trusted keys are a list compiled into the binary — rotation means shipping a build that trusts the new key *before* anything is signed with it, and revocation means shipping a build that no longer lists the old one.
+
+---
+
+## Honest limitations
+
+- **npm and pip are gated. Everything else is matched, not gated.** Go, Rust, Maven, RubyGems, Packagist, NuGet, Debian, Ubuntu and Alpine packages are inventoried and matched against advisories, but nothing stands in front of those installs.
+- **Java, Ruby, PHP and .NET version comparators are not written yet**, so advisories for those ecosystems will not match even though the packages are inventoried.
+- **No dependency chain in the block report.** npm resolves the tree client-side and asks the proxy for each package independently, so the gate sees requests with no parent. Drawing a plausible chain would mean inventing the one part of that report you would most rely on; `npm ls <package>` answers it instead.
+- **Auto-quarantine is deliberately unbuilt.** Deleting files off a machine without a person in the loop is not a default this project wants.
+- **No published binaries, no code signing, no system tray.**
+- **An ecosystem with no advisory bundle reports as NOT EXAMINED, never as clean.** That distinction is enforced throughout: "we found nothing" and "we never looked" are the same query result and opposite answers, and this tool is built to never confuse the two.
+
+---
+
+## Configuration, ports, data
+
+Settings live in `pkgwatch.toml` in the data directory; the dashboard's **Settings** page shows every value, whether it came from the file or a built-in default, and where it takes effect. It is read-only by design — the agent dashboard has no login, and a form there that could edit `bind` would turn "anything running on this box" into "anything on the network".
 
 | Port | Purpose |
 |---|---|
 | 4873 | npm gate |
 | 4874 | PyPI gate |
-| 4875 | dashboard — hub, or agent when running alone |
+| 4875 | agent dashboard |
+| 4876 | hub |
 | 4877 | agent dashboard when a hub already holds 4875 |
 
-The agent detects the conflict, logs it, and shifts. It does not crash.
+The agent detects a port conflict, logs it, and shifts. It does not crash.
 
-## Data locations
-
-| Platform | Path |
+| Platform | Data directory |
 |---|---|
 | Linux | `~/.local/share/pkgwatch/` |
 | macOS | `~/Library/Application Support/pkgwatch/` |
@@ -301,50 +187,26 @@ The agent detects the conflict, logs it, and shifts. It does not crash.
 
 `agent.db` and `hub.db` hold machine and fleet state. `advisories.db` is a separate, replaceable file attached read-only, so a bundle update is an atomic file swap rather than a migration.
 
-## Running as a service
+Both modes serve `/health`, and `pkgwatch health` asks that socket rather than the database — a check that reads the database reports a healthy machine while the listener is dead.
 
-The retroactive half only works unattended. The gate protects an install as it
-happens; the package you installed six months ago that became known-bad this
-morning is found by a pass nobody triggered — so the daemon re-scans and
-re-matches every `scan_interval_hours` (default 6, `0` disables).
+---
 
-The daemon also pulls advisory bundles from the hub it is paired with every
-`bundle_interval_hours` (default 6, `0` disables), and re-matches against what
-arrives. That is the other half of staying current: a scan re-examines this
-machine against the advisories it holds, and this is what makes those advisories
-move at all. A fresh inventory matched against a corpus that stopped ageing
-three weeks ago produces exactly the same clean report as a machine with nothing
-wrong.
+## Dependency discipline
 
-It happens inside the daemon rather than as a second scheduled task because the
-daemon is the process holding the merged database open — the dashboard, both
-gates and every scan read through it. Replacing that file means standing those
-readers down and reattaching them, which only the process that owns them can do.
-On Windows nothing else can do it at all: a rename over a file with an open
-handle fails outright, which is why `pkgwatch sync` from a terminal reports that
-the running agent will pick the bundle up itself.
+This tool watches for supply-chain attacks, so its own dependency tree is a target. Direct dependencies are capped at **8**, and `govulncheck` runs in CI.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File contrib\windows\install-task.ps1
-```
+In use: `modernc.org/sqlite`, `go-chi/chi/v5`, `spf13/cobra`, `BurntSushi/toml`, `Masterminds/semver/v3`, `package-url/packageurl-go`, `golang.org/x/crypto` (argon2id). That is 7; the eighth is reserved for `fyne.io/systray` behind a build tag. Anything else has to be stdlib or hand-written — which is why the PEP 440 parser, the CVSS calculator, the dpkg/apk comparators and the OSV reader are all in-tree.
 
-```sh
-cp contrib/systemd/pkgwatch-agent.service ~/.config/systemd/user/
-systemctl --user enable --now pkgwatch-agent
-loginctl enable-linger $USER    # so it survives logout
-```
+**On vendoring:** `vendor/` is deliberately not committed. `go mod vendor` weighs 134 MB, 125 MB of it machine-generated `modernc.org/{libc,sqlite}` — one file set per GOOS/GOARCH, the cost of pure-Go SQLite. `go.sum` pins every module by cryptographic hash, which covers tampering; what is forgone is availability if a module is yanked upstream.
 
-`contrib/` also has a launchd plist. All three watch `/health`.
+---
 
-Every completed pass logs at info even when nothing changed, which is
-deliberate: a scheduled task that is running and finding nothing looks exactly
-like one that stopped running a month ago, and the whole premise is that nobody
-is watching.
+## Status
 
-`scan_paths` lists the project trees an unattended scan walks. It is empty by
-default — there is no safe guess at where your projects live, and walking a home
-directory to find out is slow enough that nobody would leave it switched on.
-Machine-wide installs, the host's own distribution packages and every running
-container are always scanned regardless.
+Complete and running on a two-machine fleet: gating, inventory, matching, the retroactive watcher, both dashboards, hub pairing and sync, bundle relay, quarantine, credential rotation, the script guard, and packaging.
 
-On Windows, unsigned binaries trip SmartScreen and may be flagged by Defender. On macOS they need `xattr -d com.apple.quarantine`.
+Not built: the system tray, published release binaries, and the Java/Ruby/PHP/.NET comparators.
+
+## License
+
+Not yet chosen. Until one is added, no permission to use, copy or distribute is granted.
