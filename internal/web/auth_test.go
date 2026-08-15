@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -48,10 +49,25 @@ func do(h http.Handler, req *http.Request) *httptest.ResponseRecorder {
 	return rec
 }
 
+// loginToken reads the CSRF field off the rendered sign-in page, the way a
+// browser would. Scraped rather than reached for inside the Server, so these
+// tests also fail if the form ever stops carrying one.
+func loginToken(t *testing.T, h http.Handler) string {
+	t.Helper()
+	body := do(h, httptest.NewRequest(http.MethodGet, "/login", nil)).Body.String()
+	match := csrfInput.FindStringSubmatch(body)
+	if match == nil {
+		t.Fatal("the login page renders no csrf field")
+	}
+	return match[1]
+}
+
+var csrfInput = regexp.MustCompile(`name="csrf" value="([^"]+)"`)
+
 // signIn returns the session cookie a correct password yields.
 func signIn(t *testing.T, h http.Handler) *http.Cookie {
 	t.Helper()
-	form := url.Values{"password": {testPassword}}
+	form := url.Values{"csrf": {loginToken(t, h)}, "password": {testPassword}}
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -116,7 +132,7 @@ func TestCorrectPasswordOpensASessionThePageCannotRead(t *testing.T) {
 
 func TestWrongPasswordOpensNothing(t *testing.T) {
 	_, h := newGuardedServer(t)
-	form := url.Values{"password": {"not it"}}
+	form := url.Values{"csrf": {loginToken(t, h)}, "password": {"not it"}}
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -169,7 +185,12 @@ func TestLogoutEndsTheSession(t *testing.T) {
 	_, h := newGuardedServer(t)
 	cookie := signIn(t, h)
 
-	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	// Signing out is a state change, so it carries the token like every other
+	// form. A logout an attacker can trigger is a nuisance rather than a
+	// breach, but it is still an action they chose for you.
+	form := url.Values{"csrf": {loginToken(t, h)}}
+	req := httptest.NewRequest(http.MethodPost, "/logout", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	req.AddCookie(cookie)
 	rec := do(h, req)
@@ -189,7 +210,7 @@ func TestLogoutEndsTheSession(t *testing.T) {
 // and it does not need to in order to log someone in as itself or sign them out.
 func TestCrossSiteLoginAndLogoutAreRefused(t *testing.T) {
 	_, h := newGuardedServer(t)
-	form := url.Values{"password": {testPassword}}
+	form := url.Values{"csrf": {loginToken(t, h)}, "password": {testPassword}}
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Sec-Fetch-Site", "cross-site")

@@ -88,7 +88,12 @@ type Page struct {
 	ConnectionLabel string
 	Nav             []NavItem
 	SignedIn        bool
-	Data            any
+
+	// CSRF goes into every state-changing form on the page. Reached from
+	// inside a range as $.CSRF.
+	CSRF string
+
+	Data any
 }
 
 // Badge is the severity-badge partial's input.
@@ -105,6 +110,10 @@ type Server struct {
 	// deployment that could turn it off would be a deployment where somebody
 	// eventually did.
 	logins loginLimiter
+
+	// csrf is the token every state-changing form carries back. Unexported for
+	// the same reason.
+	csrf string
 
 	Mode     Mode
 	Hostname string
@@ -301,7 +310,8 @@ type badgeRow struct {
 // New parses the embedded templates. A parse failure is a programming error, so
 // it surfaces at construction rather than on the first request.
 func New(mode Mode, hostname string) (*Server, error) {
-	s := &Server{Mode: mode, Hostname: hostname, templates: map[string]*template.Template{}}
+	s := &Server{Mode: mode, Hostname: hostname, csrf: newCSRFToken(),
+		templates: map[string]*template.Template{}}
 	for _, page := range []string{"overview", "design", "timeline", "findings", "inventory",
 		"sessions", "session-report", "fleet", "devices", "search", "rotate", "quarantine",
 		"settings", "blocks", "fleet-inventory"} {
@@ -350,7 +360,7 @@ func (s *Server) routes(r chi.Router) {
 	if s.Auth != nil {
 		r.Get("/login", s.handleLogin)
 		r.Post("/login", s.handleLogin)
-		r.Post("/logout", guard(s.handleLogout))
+		r.Post("/logout", s.guard(s.handleLogout))
 	}
 
 	// Group rather than r.Use: chi refuses middleware added after routes exist,
@@ -366,7 +376,7 @@ func (s *Server) routes(r chi.Router) {
 			r.Get("/", s.handleFleet)
 			r.Get("/devices", s.handleDevices)
 			if s.SetDeviceStatus != nil {
-				r.Post("/devices/action", guard(s.handleDeviceAction))
+				r.Post("/devices/action", s.guard(s.handleDeviceAction))
 			}
 		} else {
 			r.Get("/", s.handleOverview)
@@ -403,7 +413,7 @@ func (s *Server) routes(r chi.Router) {
 		case s.Exposures != nil && s.Credentials != nil:
 			r.Get("/rotate", s.handleRotate)
 			if s.SetRotationChecked != nil {
-				r.Post("/rotate/check", guard(s.handleRotateCheck))
+				r.Post("/rotate/check", s.guard(s.handleRotateCheck))
 			}
 		case s.FleetExposures != nil && s.FleetRotation != nil:
 			r.Get("/rotate", s.handleFleetRotate)
@@ -415,7 +425,7 @@ func (s *Server) routes(r chi.Router) {
 		case s.Quarantined != nil:
 			r.Get("/quarantine", s.handleQuarantine)
 			if s.Restore != nil {
-				r.Post("/quarantine/restore", guard(s.handleRestore))
+				r.Post("/quarantine/restore", s.guard(s.handleRestore))
 			}
 		case s.FleetQuarantine != nil:
 			r.Get("/quarantine", s.handleFleetQuarantine)
@@ -423,7 +433,7 @@ func (s *Server) routes(r chi.Router) {
 		if s.Findings != nil {
 			r.Get("/findings", s.handleFindings)
 			if s.Acknowledge != nil && s.Ignore != nil {
-				r.Post("/findings/triage", guard(s.handleTriage))
+				r.Post("/findings/triage", s.guard(s.handleTriage))
 			}
 		}
 	})
@@ -501,6 +511,7 @@ func (s *Server) render(w http.ResponseWriter, page, title, active string, data 
 		// Reached only through Auth.Require when a guard is configured, so a
 		// guard being present is the same fact as this viewer being signed in.
 		SignedIn: s.Auth != nil,
+		CSRF:     s.csrf,
 		Data:     data,
 	}); err != nil {
 		slog.Error("template failed to render", "page", page, "error", err)

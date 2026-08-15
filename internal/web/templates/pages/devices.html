@@ -44,7 +44,7 @@
              "never" and "a while ago" are different problems. */}}
         <td>{{if .Device.EverReported}}{{.Silence}} ago{{else}}never{{end}}</td>
         <td class="pw-triage">
-          <form method="post" action="/devices/action">
+          <form method="post" action="/devices/action">{{template "csrf" $.CSRF}}
             <input type="hidden" name="device" value="{{.Device.ID}}">
             {{if .Device.Approved}}
               <button name="action" value="revoke" type="submit">Revoke</button>

@@ -1,0 +1,10 @@
+{{/*
+  The hidden field every state-changing form carries. Takes the token itself,
+  so a page template writes {{template "csrf" $.CSRF}} and cannot accidentally
+  pass the whole page.
+
+  One definition rather than six copies: a form that forgets this is refused,
+  which fails closed and loudly, but only if somebody notices. Having one thing
+  to copy makes forgetting less likely in the first place.
+*/}}
+{{define "csrf"}}<input type="hidden" name="csrf" value="{{.}}">{{end}}

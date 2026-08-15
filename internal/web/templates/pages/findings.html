@@ -45,7 +45,7 @@
           <td class="pw-mono pw-dim">{{.Advisory}}</td>
           {{if $.Data.CanTriage}}
           <td class="pw-triage">
-            <form method="post" action="/findings/triage">
+            <form method="post" action="/findings/triage">{{template "csrf" $.CSRF}}
               <input type="hidden" name="purl" value="{{.PURL}}">
               <input type="hidden" name="advisory" value="{{.Advisory}}">
               <input type="hidden" name="back" value="{{$.Data.Back}}">

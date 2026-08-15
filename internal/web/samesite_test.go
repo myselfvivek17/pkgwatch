@@ -14,7 +14,7 @@ import (
 
 // triageServer records what reached the write path, so a refused request can be
 // told apart from one that was allowed and merely failed.
-func triageServer(t *testing.T, applied *[]string) http.Handler {
+func triageServer(t *testing.T, applied *[]string) (string, http.Handler) {
 	t.Helper()
 	srv, err := New(ModeAgent, "test-host")
 	if err != nil {
@@ -34,10 +34,15 @@ func triageServer(t *testing.T, applied *[]string) http.Handler {
 	}
 	r := chi.NewRouter()
 	srv.Routes(r)
-	return r
+	// The token the real forms carry. A test that posted without it would
+	// be testing the CSRF check rather than the thing it names.
+	return srv.csrf, r
 }
 
-func postTriage(h http.Handler, form url.Values, headers map[string]string) *httptest.ResponseRecorder {
+func postTriage(h http.Handler, token string, form url.Values, headers map[string]string) *httptest.ResponseRecorder {
+	if form.Get("csrf") == "" {
+		form.Set("csrf", token)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/findings/triage", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Host = "127.0.0.1:4875"
@@ -55,7 +60,7 @@ func postTriage(h http.Handler, form url.Values, headers map[string]string) *htt
 // finding.
 func TestTriageRefusesCrossSitePosts(t *testing.T) {
 	var applied []string
-	h := triageServer(t, &applied)
+	token, h := triageServer(t, &applied)
 
 	form := url.Values{"purl": {"pkg:npm/lodash@4.17.20"}, "advisory": {"GHSA-x"}, "action": {"ack"}}
 
@@ -68,7 +73,7 @@ func TestTriageRefusesCrossSitePosts(t *testing.T) {
 		{"forged origin", map[string]string{"Origin": "http://evil.example"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rec := postTriage(h, form, tc.headers)
+			rec := postTriage(h, token, form, tc.headers)
 			if rec.Code != http.StatusForbidden {
 				t.Errorf("code = %d, want 403", rec.Code)
 			}
@@ -81,9 +86,9 @@ func TestTriageRefusesCrossSitePosts(t *testing.T) {
 
 func TestTriageAcceptsThePageItself(t *testing.T) {
 	var applied []string
-	h := triageServer(t, &applied)
+	token, h := triageServer(t, &applied)
 
-	rec := postTriage(h,
+	rec := postTriage(h, token,
 		url.Values{"purl": {"pkg:npm/lodash@4.17.20"}, "advisory": {"GHSA-x"}, "action": {"ack"}},
 		map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "http://127.0.0.1:4875"})
 
@@ -99,10 +104,10 @@ func TestTriageAcceptsThePageItself(t *testing.T) {
 // would be an ignore that never comes back, which is what --days exists to stop.
 func TestTriageRejectsAnIgnoreWithNoWindow(t *testing.T) {
 	var applied []string
-	h := triageServer(t, &applied)
+	token, h := triageServer(t, &applied)
 
 	for _, days := range []string{"0", "", "-5", "soon"} {
-		rec := postTriage(h,
+		rec := postTriage(h, token,
 			url.Values{"purl": {"pkg:npm/lodash@4.17.20"}, "advisory": {"GHSA-x"},
 				"action": {"ignore"}, "days": {days}},
 			map[string]string{"Sec-Fetch-Site": "same-origin"})
@@ -118,9 +123,9 @@ func TestTriageRejectsAnIgnoreWithNoWindow(t *testing.T) {
 // An open redirect on a form post is a small hole with no reason to exist.
 func TestTriageOnlyRedirectsBackToFindings(t *testing.T) {
 	var applied []string
-	h := triageServer(t, &applied)
+	token, h := triageServer(t, &applied)
 
-	rec := postTriage(h,
+	rec := postTriage(h, token,
 		url.Values{"purl": {"pkg:npm/lodash@4.17.20"}, "advisory": {"GHSA-x"},
 			"action": {"ack"}, "back": {"https://evil.example/"}},
 		map[string]string{"Sec-Fetch-Site": "same-origin"})

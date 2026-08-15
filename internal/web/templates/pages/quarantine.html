@@ -41,7 +41,7 @@
           {{if $.Data.CanRestore}}
           <td class="pw-triage">
             {{if .Restorable}}
-            <form method="post" action="/quarantine/restore">
+            <form method="post" action="/quarantine/restore">{{template "csrf" $.CSRF}}
               <input type="hidden" name="id" value="{{.ID}}">
               <button type="submit" title="unpack it back to where it was">restore</button>
             </form>

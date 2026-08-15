@@ -98,7 +98,7 @@
             {{if .Checked}}✓{{else}}&nbsp;{{end}}
           </span>
           {{else}}
-          <form method="post" action="/rotate/check">
+          <form method="post" action="/rotate/check">{{template "csrf" $.CSRF}}
             <input type="hidden" name="purl" value="{{$exposure.PURL}}">
             <input type="hidden" name="advisory" value="{{$exposure.AdvisoryID}}">
             <input type="hidden" name="item" value="{{.ID}}">

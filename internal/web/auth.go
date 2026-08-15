@@ -162,6 +162,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.renderLogin(w, "Could not read that form.")
 		return
 	}
+	// Checked before the throttle so a forged submission cannot arm somebody
+	// else's backoff — otherwise a page you visited could lock you out of your
+	// own dashboard for fifteen seconds at a time without ever guessing.
+	if !s.validCSRF(r) {
+		s.renderLoginStatus(w, http.StatusForbidden,
+			"That sign-in form was stale. Reload the page and try again.")
+		return
+	}
 
 	// Refused before any hashing. Verifying a password costs 64 MiB, so an
 	// endpoint that hashes on demand for anyone who can reach the port is a
@@ -211,5 +219,6 @@ func (s *Server) renderLoginStatus(w http.ResponseWriter, status int, problem st
 	tpl.ExecuteTemplate(w, "login", map[string]any{
 		"Identity": s.identity(),
 		"Problem":  problem,
+		"CSRF":     s.csrf,
 	})
 }

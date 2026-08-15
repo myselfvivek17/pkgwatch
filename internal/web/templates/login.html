@@ -26,7 +26,12 @@
     </div>
   </div>
 
+  {{/* Written out rather than {{template "csrf"}}: this page is parsed on its
+       own, without the partials, because it deliberately has no layout. Login
+       CSRF is a real thing — an attacker who can log you into an account they
+       control gets your next actions attributed to it. */}}
   <form method="post" action="/login" class="pw-login-form">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
     <label for="password">Hub password</label>
     <input id="password" name="password" type="password" autocomplete="current-password"
            autofocus required>
