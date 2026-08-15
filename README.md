@@ -209,4 +209,8 @@ Not built: the system tray, published release binaries, and the Java/Ruby/PHP/.N
 
 ## License
 
-Not yet chosen. Until one is added, no permission to use, copy or distribute is granted.
+[Apache License 2.0](LICENSE). Use it, fork it, ship it — including commercially.
+
+Apache rather than MIT for one substantive reason: it grants patent rights explicitly, and MIT is silent on them. That silence is where adoption of a security tool stalls inside a company. It also matches the licence of the ecosystem this reads from — osv-scanner, Trivy, Syft and Grype are all Apache-2.0.
+
+The licence covers the code and does not grant rights to the name. A fork is welcome; a fork presenting itself as official pkgwatch, or distributing advisory bundles as though they came from this project's publisher key, is a different thing.
