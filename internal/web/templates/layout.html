@@ -6,14 +6,10 @@
 <title>{{.Title}} · pkgwatch</title>
 <link rel="stylesheet" href="/static/theme.css">
 <link rel="stylesheet" href="/static/app.css">
-<script>
-  // Applied before first paint so the page never flashes the wrong theme.
-  try {
-    if (localStorage.getItem("pkgwatch-theme") === "light") {
-      document.documentElement.setAttribute("data-theme", "light");
-    }
-  } catch (e) {}
-</script>
+{{/* Synchronous and in <head>: it runs before first paint, so the page never
+     flashes the wrong theme. A file rather than inline script, so the CSP can
+     forbid inline script outright. */}}
+<script src="/static/theme-init.js"></script>
 </head>
 <body>
 <div class="pw-root">

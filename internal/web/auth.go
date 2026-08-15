@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -161,7 +162,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.renderLogin(w, "Could not read that form.")
 		return
 	}
-	if !secret.Verify(r.PostFormValue("password"), s.Auth.PasswordHash) {
+
+	// Refused before any hashing. Verifying a password costs 64 MiB, so an
+	// endpoint that hashes on demand for anyone who can reach the port is a
+	// memory amplifier as much as it is a guessing target.
+	now := time.Now()
+	if wait := s.logins.wait(now); wait > 0 {
+		seconds := int(wait.Seconds()) + 1
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		s.renderLoginStatus(w, http.StatusTooManyRequests,
+			fmt.Sprintf("Too many attempts. Try again in %d second(s).", seconds))
+		return
+	}
+
+	if !s.logins.attempt(now, func() bool {
+		return secret.Verify(r.PostFormValue("password"), s.Auth.PasswordHash)
+	}) {
 		// Deliberately not logged with the attempt. A password typed into the
 		// wrong field is the most common way one ends up in a log file.
 		s.renderLogin(w, "That password did not match.")
@@ -177,12 +193,21 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderLogin(w http.ResponseWriter, problem string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	s.renderLoginStatus(w, http.StatusOK, problem)
+}
+
+// renderLoginStatus draws the login page with an explicit status, so a refused
+// attempt can answer 429 and still be a readable page rather than a bare error.
+func (s *Server) renderLoginStatus(w http.ResponseWriter, status int, problem string) {
 	tpl, ok := s.templates["login"]
 	if !ok {
 		http.Error(w, "login page unavailable", http.StatusInternalServerError)
 		return
 	}
+	// Header, then status, then body. Setting a header after WriteHeader is
+	// silently dropped.
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	tpl.ExecuteTemplate(w, "login", map[string]any{
 		"Identity": s.identity(),
 		"Problem":  problem,

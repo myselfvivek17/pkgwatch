@@ -100,6 +100,12 @@ type Badge struct {
 
 // Server renders the shell. Callers supply the facts that differ per mode.
 type Server struct {
+	// logins bounds what an unauthenticated caller can spend on password
+	// verification. Not exported and not configurable: it is a floor, and a
+	// deployment that could turn it off would be a deployment where somebody
+	// eventually did.
+	logins loginLimiter
+
 	Mode     Mode
 	Hostname string
 	// HubLabel names the hub an agent is paired with, or "" when unpaired.
@@ -323,6 +329,21 @@ func New(mode Mode, hostname string) (*Server, error) {
 // Routes mounts the shell onto r. The /static/* wildcard is chi syntax — chi
 // patterns are exact matches unless a wildcard says otherwise.
 func (s *Server) Routes(r chi.Router) {
+	// A group, not r.Use on the caller's router. chi panics if middleware is
+	// added after any route is registered, and the hub mounts its device API
+	// before calling this — so reaching for the whole mux would make the order
+	// of two unrelated calls load-bearing.
+	//
+	// The group covers everything this server mounts, including /static and the
+	// login page: headers that only cover the pages somebody remembered are the
+	// ones that turn out not to cover the page that mattered.
+	r.Group(func(r chi.Router) {
+		r.Use(secureHeaders)
+		s.routes(r)
+	})
+}
+
+func (s *Server) routes(r chi.Router) {
 	// Static assets stay outside the guard: the login page needs its stylesheet,
 	// and nothing under /static is a fact about this fleet.
 	r.Handle("/static/*", http.FileServer(http.FS(assets)))

@@ -6,13 +6,7 @@
 <title>Sign in · pkgwatch</title>
 <link rel="stylesheet" href="/static/theme.css">
 <link rel="stylesheet" href="/static/app.css">
-<script>
-  try {
-    if (localStorage.getItem("pkgwatch-theme") === "light") {
-      document.documentElement.setAttribute("data-theme", "light");
-    }
-  } catch (e) {}
-</script>
+<script src="/static/theme-init.js"></script>
 </head>
 {{/* No sidebar. Every nav link leads somewhere this session cannot reach, and
      a menu of doors that all bounce you back here is worse than no menu. */}}
