@@ -226,14 +226,14 @@ fingerprint:
 
 ```sh
 pkgwatch hub pair-code       # 8 characters, single use, 10-minute TTL
-pkgwatch hub fingerprint     # e.g. FB93-57EB-...-9B70
+pkgwatch hub fingerprint     # e.g. A1B2-C3D4-E5F6-7890-A1B2-C3D4-E5F6-7890
 ```
 
 **2. On the agent**, pair — passing the fingerprint you just read:
 
 ```sh
 pkgwatch agent pair --hub https://192.0.2.10:4876 --code ABCD1234 \
-    --fingerprint FB93-57EB-...-9B70
+    --fingerprint A1B2-C3D4-E5F6-7890-A1B2-C3D4-E5F6-7890
 ```
 
 The fingerprint is checked during the handshake, so a mismatch fails *before*
@@ -247,7 +247,7 @@ The agent prints a **device ID** derived from its own key.
 
 ```sh
 pkgwatch hub devices list
-pkgwatch hub devices approve G3WC-QNL4-...-Q4
+pkgwatch hub devices approve ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-23
 ```
 
 That comparison is the anti-MITM step. Approving without looking is what the
@@ -273,7 +273,7 @@ anything back down.
 ### Revoking
 
 ```sh
-pkgwatch hub devices revoke G3WC-QNL4-...-Q4
+pkgwatch hub devices revoke ABCD-EFGH-JKLM-NPQR-STUV-WXYZ-23
 ```
 
 The agent stops syncing and **keeps gating locally**.
